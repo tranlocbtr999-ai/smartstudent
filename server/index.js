@@ -26,7 +26,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
   .map((origin) => origin.trim())
   .filter(Boolean)
 if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL.trim())
-const isExamAiVercelOrigin = (origin) => /^https:\/\/smartstudent(?:-[a-z0-9-]+)?-tranlocbtr99\.vercel\.app$/.test(origin)
+const isExamAiVercelOrigin = (origin) => /^https:\/\/smartstudent(?:-[a-z0-9-]+)?(?:-tranlocbtr99)?\.vercel\.app$/.test(origin)
 
 app.use(cors({
   origin(origin, callback) {
