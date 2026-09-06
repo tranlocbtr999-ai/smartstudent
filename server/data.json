@@ -23,6 +23,7 @@
       "username": "student",
       "email": "student@examai.vn",
       "name": "Nguyễn Văn An",
+      "studentCode": "HS00128",
       "role": "student",
       "passwordHash": "$2b$10$p/./2jHzxXO.EtRALFlGY.aBPXPTORf3taXvc6uJ/Us2DW2ulBSRW",
       "createdAt": "2026-09-01T09:00:00.000Z"
