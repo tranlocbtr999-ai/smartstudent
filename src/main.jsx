@@ -29,6 +29,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('overview')
   const [showClassModal, setShowClassModal] = useState(false)
   const [showNotice, setShowNotice] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const selectedClass = classes.find((item) => item.code === selectedCode) ?? classes[0]
@@ -80,32 +81,33 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      {mobileMenuOpen && <button className="mobile-menu-backdrop" aria-label="Đóng menu" onClick={() => setMobileMenuOpen(false)} />}
+      <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
         <div className="brand"><span className="brand-mark"><GraduationCap size={20} /></span><span>Exam<span>AI</span></span></div>
         <div className="workspace-label">KHÔNG GIAN LÀM VIỆC</div>
         <nav className="main-nav" aria-label="Điều hướng chính">
-          <NavItem icon={<LayoutDashboard size={18} />} label="Tổng quan" onClick={() => setActiveTab('overview')} active={activeTab === 'overview'} />
-          <NavItem icon={<Users size={18} />} label="Lớp học" onClick={() => setActiveTab('overview')} active={activeTab === 'overview'} />
-          <NavItem icon={<BookOpen size={18} />} label="Đề thi" onClick={() => setActiveTab('exams')} active={activeTab === 'exams'} />
-          <NavItem icon={<ClipboardCheck size={18} />} label="Bài tập" onClick={() => setActiveTab('assignments')} active={activeTab === 'assignments'} />
-          <NavItem icon={<CalendarDays size={18} />} label="Điểm danh" onClick={() => setActiveTab('attendance')} active={activeTab === 'attendance'} />
-          <NavItem icon={<GraduationCap size={18} />} label="Học sinh" onClick={() => setActiveTab('students')} active={activeTab === 'students'} />
+          <NavItem icon={<LayoutDashboard size={18} />} label="Tổng quan" onClick={() => { setActiveTab('overview'); setMobileMenuOpen(false) }} active={activeTab === 'overview'} />
+          <NavItem icon={<Users size={18} />} label="Lớp học" onClick={() => { setActiveTab('overview'); setMobileMenuOpen(false) }} active={activeTab === 'overview'} />
+          <NavItem icon={<BookOpen size={18} />} label="Đề thi" onClick={() => { setActiveTab('exams'); setMobileMenuOpen(false) }} active={activeTab === 'exams'} />
+          <NavItem icon={<ClipboardCheck size={18} />} label="Bài tập" onClick={() => { setActiveTab('assignments'); setMobileMenuOpen(false) }} active={activeTab === 'assignments'} />
+          <NavItem icon={<CalendarDays size={18} />} label="Điểm danh" onClick={() => { setActiveTab('attendance'); setMobileMenuOpen(false) }} active={activeTab === 'attendance'} />
+          <NavItem icon={<GraduationCap size={18} />} label="Học sinh" onClick={() => { setActiveTab('students'); setMobileMenuOpen(false) }} active={activeTab === 'students'} />
           <NavItem icon={<Zap size={18} />} label="Kết quả" onClick={() => setActiveTab('exams')} active={false} />
           {user.role === 'admin' && <NavItem icon={<Settings size={18} />} label="Quản trị user" onClick={() => setActiveTab('admin')} active={activeTab === 'admin'} />}
           <NavItem icon={<Bell size={18} />} label="Thông báo" onClick={() => setShowNotice(true)} active={showNotice} />
           {user.role !== 'student' && <NavItem icon={<Zap size={18} />} label="Nhập đề online" onClick={() => setActiveTab('ai')} active={activeTab === 'ai'} />}
         </nav>
         <div className="sidebar-bottom">
-          <NavItem icon={<Settings size={18} />} label="Cài đặt" onClick={() => setActiveTab('settings')} active={activeTab === 'settings'} />
+          <NavItem icon={<Settings size={18} />} label="Cài đặt" onClick={() => { setActiveTab('settings'); setMobileMenuOpen(false) }} active={activeTab === 'settings'} />
           <div className="profile-card"><div className="avatar avatar-dark">{user.name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{user.name}</strong><small>{user.role}</small></div><button className="logout-button" onClick={() => { localStorage.removeItem('examai_token'); localStorage.removeItem('examai_user'); setUser(null) }} title="Đăng xuất"><LogOut size={16} /><span>Đăng xuất</span></button></div>
         </div>
       </aside>
 
       <main className="main-content">
         <header className="topbar">
-          <button className="mobile-menu icon-button" aria-label="Mở menu"><Menu size={20} /></button>
+          <button className="mobile-menu icon-button" aria-label={mobileMenuOpen ? 'Đóng menu' : 'Mở menu'} onClick={() => setMobileMenuOpen((open) => !open)}><Menu size={20} /></button>
           <div className="breadcrumb"><span>Không gian giảng dạy</span><span>/</span><strong>Lớp học</strong></div>
-          <div className="top-actions"><div className="search-box"><Search size={17} /><input aria-label="Tìm kiếm lớp học" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Tìm kiếm lớp..." /></div><button className="icon-button notification-button" aria-label="Thông báo" onClick={() => setShowNotice(!showNotice)}><Bell size={19} />{notifications.length > 0 && <i>{notifications.length}</i>}</button><div className="avatar avatar-small">NA</div></div>
+          <div className="top-actions"><div className="search-box"><Search size={17} /><input aria-label="Tìm kiếm lớp học" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Tìm kiếm lớp..." /></div><button className="icon-button notification-button" aria-label="Thông báo" onClick={() => setShowNotice(!showNotice)}><Bell size={19} />{notifications.length > 0 && <i>{notifications.length}</i>}</button><button className="avatar avatar-small avatar-button" aria-label="Mở quản lý tài khoản" onClick={() => setActiveTab('settings')}>{user.name.split(' ').map((part) => part[0]).slice(-2).join('')}</button></div>
           {showNotice && <div className="notification-popover"><strong>Thông báo mới</strong>{notifications.length ? notifications.slice(0, 4).map((notification) => <p key={notification.id}>{notification.message}</p>) : <p>Chưa có thông báo mới.</p>}</div>}
         </header>
 
