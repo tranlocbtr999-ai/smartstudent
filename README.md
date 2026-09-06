@@ -68,10 +68,10 @@ Lưu ý: `server/data.json` phù hợp cho demo và development. Production nên
 ### Checklist deploy Vercel + Render
 
 1. Deploy repository trên Render dưới dạng **Web Service**. Render sẽ dùng `render.yaml`; đặt các secret `JWT_SECRET`, `GEMINI_API_KEY`, `GOOGLE_CLIENT_ID`, `RESEND_API_KEY` và `MAIL_FROM` trong Environment.
-2. Copy URL Render, ví dụ `https://exam-ai-api.onrender.com`, sau đó trên Vercel tạo biến `VITE_API_URL=https://exam-ai-api.onrender.com/api`.
+2. Copy URL Render, ví dụ `https://smart-4ge3.onrender.com`, sau đó trên Vercel tạo biến `VITE_API_URL=https://smart-4ge3.onrender.com/api`. Nếu Vercel đang có giá trị `exam-ai-api-7t0d.onrender.com`, hãy thay thế và redeploy.
 3. Trên Render đặt `FRONTEND_URL` bằng domain Vercel production và cập nhật `ALLOWED_ORIGINS` nếu dùng thêm preview domain. Redeploy backend sau khi đổi biến môi trường.
 4. Nếu dùng Google, đặt cùng một Web Client ID vào `GOOGLE_CLIENT_ID` trên Render và `VITE_GOOGLE_CLIENT_ID` trên Vercel; thêm domain Vercel vào **Authorized JavaScript origins**.
-5. Vercel dùng `npm run build` và thư mục `dist` theo `vercel.json`. Sau khi deploy, kiểm tra `https://<render-service>.onrender.com/api/health` trước khi đăng nhập trên frontend.
+5. Vercel dùng `npm run build` và thư mục `dist` theo `vercel.json`. Sau khi deploy, kiểm tra `https://smart-4ge3.onrender.com/api/health` trước khi đăng nhập trên frontend.
 
 Đăng ký hiện có hai loại tài khoản: **Học sinh** và **Giáo viên**. Tài khoản giáo viên được đưa vào trang quản lý lớp, điểm danh, bài tập và tạo đề; tài khoản học sinh được đưa vào không gian học tập riêng để xem lớp, bài tập và bài kiểm tra được giao.
 
