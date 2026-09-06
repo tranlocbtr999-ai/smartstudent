@@ -93,7 +93,7 @@ function App() {
           <NavItem icon={<Zap size={18} />} label="Kết quả" onClick={() => setActiveTab('exams')} active={false} />
           {user.role === 'admin' && <NavItem icon={<Settings size={18} />} label="Quản trị user" onClick={() => setActiveTab('admin')} active={activeTab === 'admin'} />}
           <NavItem icon={<Bell size={18} />} label="Thông báo" onClick={() => setShowNotice(true)} active={showNotice} />
-          {user.role !== 'student' && <NavItem icon={<Zap size={18} />} label="AI tạo đề" onClick={() => setActiveTab('ai')} active={activeTab === 'ai'} />}
+          {user.role !== 'student' && <NavItem icon={<Zap size={18} />} label="Nhập đề online" onClick={() => setActiveTab('ai')} active={activeTab === 'ai'} />}
         </nav>
         <div className="sidebar-bottom">
           <NavItem icon={<Settings size={18} />} label="Cài đặt" onClick={() => setActiveTab('settings')} active={activeTab === 'settings'} />
@@ -271,6 +271,7 @@ function StudentPortal({ user, onLogout }) {
   const [classes, setClasses] = useState([])
   const [assignments, setAssignments] = useState([])
   const [exams, setExams] = useState([])
+  const [view, setView] = useState('home')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -291,13 +292,16 @@ function StudentPortal({ user, onLogout }) {
     load()
   }, [])
 
+  if (view === 'exam') return <main className="auth-screen student-portal-screen"><section className="student-portal"><ExamRunner user={user} onBack={() => setView('home')} /></section></main>
+  if (view === 'settings') return <main className="auth-screen student-portal-screen"><section className="student-portal"><AccountSettings user={user} onUserUpdated={(updated) => { localStorage.setItem('examai_user', JSON.stringify(updated)); setView('home') }} /><button className="secondary-button portal-back-button" onClick={() => setView('home')}>← Về trang học tập</button></section></main>
+
   return <main className="auth-screen student-portal-screen"><section className="student-portal">
-    <header className="student-portal-head"><div><div className="brand"><span className="brand-mark"><GraduationCap size={20} /></span><span>Exam<span>AI</span></span></div><span className="section-kicker">KHÔNG GIAN HỌC TẬP</span><h1>Xin chào, {user.name}</h1><p className="muted">Theo dõi lớp học, bài tập và bài kiểm tra của bạn.</p></div><button className="secondary-button" onClick={onLogout}><LogOut size={16} /> Đăng xuất</button></header>
+    <header className="student-portal-head"><div><div className="brand"><span className="brand-mark"><GraduationCap size={20} /></span><span>Exam<span>AI</span></span></div><span className="section-kicker">KHÔNG GIAN HỌC TẬP</span><h1>Xin chào, {user.name}</h1><p className="muted">Theo dõi lớp học, bài tập và bài kiểm tra của bạn.</p></div><div className="portal-actions"><button className="secondary-button" onClick={() => setView('settings')}><Settings size={16} /> Tài khoản</button><button className="secondary-button" onClick={onLogout}><LogOut size={16} /> Đăng xuất</button></div></header>
     {error && <p className="api-alert">{error}</p>}
     {loading ? <div className="boot-state">Đang tải không gian học tập...</div> : <div className="student-portal-grid">
       <section className="panel"><div className="panel-head"><div><span className="section-kicker">LỚP HỌC CỦA TÔI</span><h3>{classes.length} lớp</h3></div><Users size={20} /></div>{classes.length ? classes.map((classItem) => <div className="assignment-row" key={classItem.id}><div className="assignment-icon blue"><BookOpen size={19} /></div><div><strong>{classItem.code}</strong><small>{classItem.name} · {classItem.schedule || 'Chưa có lịch học'}</small></div><span className="assignment-progress blue">{classItem.studentCount} HS</span></div>) : <p className="interaction-hint">Bạn chưa được thêm vào lớp nào.</p>}</section>
-      <section className="panel"><div className="panel-head"><div><span className="section-kicker">BÀI KIỂM TRA</span><h3>{exams.length} bài có thể làm</h3></div><ClipboardCheck size={20} /></div>{exams.length ? exams.map((exam) => <div className="exam-list-item" key={exam.id}><div className="assignment-icon orange"><ClipboardCheck size={18} /></div><span><strong>{exam.title}</strong><small>{exam.questionCount} câu · {exam.durationMinutes} phút</small></span></div>) : <p className="interaction-hint">Chưa có bài kiểm tra được giao.</p>}</section>
-      <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">BÀI TẬP SẮP TỚI</span><h3>{assignments.length} hoạt động</h3></div><CalendarDays size={20} /></div>{assignments.length ? <div className="assignment-list">{assignments.map((assignment) => <Assignment key={assignment.id} title={assignment.title} type={assignment.type === 'exam' ? 'Bài kiểm tra' : 'Tài liệu'} due={`Hạn nộp ${new Date(assignment.dueAt).toLocaleDateString('vi-VN')}`} progress="Chưa nộp" tone={assignment.type === 'exam' ? 'orange' : 'blue'} />)}</div> : <p className="interaction-hint">Chưa có bài tập nào.</p>}</section>
+      <section className="panel"><div className="panel-head"><div><span className="section-kicker">BÀI KIỂM TRA</span><h3>{exams.length} bài có thể làm</h3></div><ClipboardCheck size={20} /></div>{exams.length ? exams.map((exam) => <button className="exam-list-item exam-list-button" key={exam.id} onClick={() => setView('exam')}><div className="assignment-icon orange"><ClipboardCheck size={18} /></div><span><strong>{exam.title}</strong><small>{exam.questionCount} câu · {exam.durationMinutes} phút</small></span><span className="row-arrow">→</span></button>) : <p className="interaction-hint">Chưa có bài kiểm tra được giao.</p>}</section>
+      <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">BÀI TẬP SẮP TỚI</span><h3>{assignments.length} hoạt động</h3></div><CalendarDays size={20} /></div>{assignments.length ? <div className="assignment-list">{assignments.map((assignment) => <button className="assignment-row assignment-button" key={assignment.id} onClick={() => assignment.examId && setView('exam')}><div className={`assignment-icon ${assignment.type === 'exam' ? 'orange' : 'blue'}`}><BookOpen size={19} /></div><div><strong>{assignment.title}</strong><small>{assignment.type === 'exam' ? 'Bài kiểm tra online' : 'Tài liệu'} · Hạn nộp {new Date(assignment.dueAt).toLocaleDateString('vi-VN')}</small></div><span className="assignment-progress blue">{assignment.examId ? 'Làm bài →' : 'Đã giao'}</span></button>)}</div> : <p className="interaction-hint">Chưa có bài tập nào.</p>}</section>
     </div>}
   </section></main>
 }
@@ -362,19 +366,38 @@ function AccountSettings({ user, onUserUpdated }) {
   return <section className="settings-grid"><section className="panel"><span className="section-kicker">TÀI KHOẢN</span><h3>Thông tin cá nhân</h3><form className="auth-form settings-form" onSubmit={saveProfile}><label>Họ và tên<input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} required /></label><label>Email<input value={user.email} disabled /></label><label>Số điện thoại<input value={profile.phone} onChange={(event) => setProfile({ ...profile, phone: event.target.value })} /></label><label>Mã học sinh<input value={profile.studentCode} onChange={(event) => setProfile({ ...profile, studentCode: event.target.value })} /></label><button className="primary-button">Lưu thông tin</button></form></section><section className="panel"><span className="section-kicker">BẢO MẬT</span><h3>Thay đổi mật khẩu</h3><form className="auth-form settings-form" onSubmit={changePassword}><label>Mật khẩu hiện tại<input type="password" value={passwords.currentPassword} onChange={(event) => setPasswords({ ...passwords, currentPassword: event.target.value })} required /></label><label>Mật khẩu mới<input type="password" minLength={8} value={passwords.newPassword} onChange={(event) => setPasswords({ ...passwords, newPassword: event.target.value })} required /></label><button className="primary-button">Đổi mật khẩu</button></form>{message && <p className="success-alert">{message}</p>}{error && <p className="api-alert">{error}</p>}</section></section>
 }
 
-function ExamRunner() {
+function ExamRunner({ user, onBack }) {
   const [exams, setExams] = useState([])
   const [selected, setSelected] = useState(null)
   const [answers, setAnswers] = useState([])
-  const [studentId, setStudentId] = useState('')
+  const [studentId, setStudentId] = useState(user?.studentCode || '')
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   useEffect(() => { api.getExams().then(setExams).catch((requestError) => setError(requestError.message)) }, [])
   async function openExam(examId) { try { setSelected(await api.getExam(examId)); setAnswers([]); setResult(null) } catch (requestError) { setError(requestError.message) } }
   async function submitExam() { try { setResult(await api.submitAttempt(selected.id, { studentId: studentId.trim().toUpperCase(), answers })) } catch (requestError) { setError(requestError.message) } }
   if (result) return <section className="panel exam-result"><span className="section-kicker">KẾT QUẢ BÀI LÀM</span><strong>{result.score}/10</strong><p>Đúng {result.correctCount}/{result.totalQuestions} câu hỏi.</p><button className="secondary-button" onClick={() => setResult(null)}>Xem lại bài</button></section>
-  if (selected) return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">BÀI KIỂM TRA</span><h3>{selected.title}</h3></div><button className="secondary-button" onClick={() => setSelected(null)}>← Danh sách đề</button></div><label className="student-id-field">Mã học sinh<input value={studentId} onChange={(event) => setStudentId(event.target.value)} placeholder="Ví dụ: HS00128" /></label><div className="student-exam-list">{selected.questions.map((question, index) => <article className="student-question" key={`${question.question}-${index}`}><strong>Câu {index + 1}. {question.question}</strong>{question.options.map((option, optionIndex) => <label key={option}><input type="radio" name={`question-${index}`} checked={answers[index] === optionIndex} onChange={() => setAnswers((current) => { const next = [...current]; next[index] = optionIndex; return next })} /> {option}</label>)}</article>)}</div><button className="primary-button submit-exam" onClick={submitExam} disabled={!studentId.trim() || answers.length !== selected.questions.length}>Nộp bài</button></section>
+  if (selected) return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">BÀI KIỂM TRA ONLINE</span><h3>{selected.title}</h3></div><button className="secondary-button" onClick={() => { setSelected(null); onBack?.() }}>← Danh sách đề</button></div>{user ? <p className="student-id-field">Mã học sinh: <strong>{studentId || 'Chưa cập nhật'}</strong></p> : <label className="student-id-field">Mã học sinh<input value={studentId} onChange={(event) => setStudentId(event.target.value)} placeholder="Ví dụ: HS00128" /></label>}<div className="student-exam-list">{selected.questions.map((question, index) => <article className="student-question" key={`${question.question}-${index}`}><strong>Câu {index + 1}. {question.question}</strong>{question.options.map((option, optionIndex) => <label key={option}><input type="radio" name={`question-${index}`} checked={answers[index] === optionIndex} onChange={() => setAnswers((current) => { const next = [...current]; next[index] = optionIndex; return next })} /> {option}</label>)}</article>)}</div><button className="primary-button submit-exam" onClick={submitExam} disabled={!studentId.trim() || answers.length !== selected.questions.length}>Nộp bài</button></section>
   return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">DÀNH CHO HỌC SINH</span><h3>Bài kiểm tra trực tuyến</h3></div></div>{error && <p className="interaction-hint">{error}</p>}{exams.length ? <div className="exam-list">{exams.map((exam) => <button className="exam-list-item" key={exam.id} onClick={() => openExam(exam.id)}><div className="assignment-icon orange"><ClipboardCheck size={18} /></div><span><strong>{exam.title}</strong><small>{exam.questionCount} câu · {exam.durationMinutes} phút</small></span><span className="row-arrow">→</span></button>)}</div> : <div className="empty-preview"><ClipboardCheck size={26} /><strong>Chưa có bài kiểm tra</strong><p>Đề thi giáo viên lưu sẽ xuất hiện ở đây.</p></div>}</section>
+}
+
+function parseManualExam(text) {
+  const blocks = text.split(/\n(?=\s*(?:Câu|Question)\s*\d+[.:])/i).map((block) => block.trim()).filter(Boolean)
+  const questions = blocks.map((block) => {
+    const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    const questionLine = lines[0].replace(/^(?:Câu|Question)\s*\d+\s*[.:]\s*/i, '')
+    const options = []
+    let correctAnswer = null
+    lines.slice(1).forEach((line) => {
+      const option = line.match(/^([A-D])[\s.)]+(.+)$/i)
+      const answer = line.match(/^(?:Đáp án|ĐA|Answer)\s*[:.]?\s*([A-D])/i)
+      if (option) options.push(option[2].trim())
+      if (answer) correctAnswer = answer[1].toUpperCase().charCodeAt(0) - 65
+    })
+    return { question: questionLine, options, correctAnswer, explanation: '' }
+  }).filter((question) => question.question && question.options.length >= 2)
+  if (!questions.length) throw new Error('Không nhận diện được câu hỏi. Hãy dùng định dạng: Câu 1: ... rồi các dòng A. ..., B. ... và Đáp án: A.')
+  return { title: 'Bài kiểm tra nhập trực tiếp', subject: '', questions }
 }
 
 function AIGeneratorV2({ classId }) {
@@ -388,7 +411,7 @@ function AIGeneratorV2({ classId }) {
     event.preventDefault(); setBusy(true); setError(''); setExam(null); setSavedId(''); setPublished(false)
     const form = new FormData(event.currentTarget)
     try {
-      const result = mode === 'file' ? await api.generateExamFromFile(form) : await api.convertExamText({ text: form.get('topic'), instructions: form.get('instructions') })
+      const result = mode === 'file' ? await api.generateExamFromFile(form) : parseManualExam(form.get('topic'))
       setExam(result)
     } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
   }
