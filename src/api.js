@@ -1,4 +1,8 @@
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'https://smart-4ge3.onrender.com/api' : 'http://localhost:4000/api')
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
+const productionApiUrl = 'https://smart-4ge3.onrender.com/api'
+const API_URL = import.meta.env.PROD
+  ? (configuredApiUrl && !configuredApiUrl.includes('exam-ai-api-7t0d.onrender.com') ? configuredApiUrl : productionApiUrl)
+  : (configuredApiUrl || 'http://localhost:4000/api')
 
 async function request(path, options = {}) {
   const isFormData = options.body instanceof FormData
