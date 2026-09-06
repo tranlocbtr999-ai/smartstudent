@@ -25,6 +25,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean)
+if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL.trim())
 const isExamAiVercelOrigin = (origin) => /^https:\/\/smartstudent(?:-[a-z0-9-]+)?-tranlocbtr99\.vercel\.app$/.test(origin)
 
 app.use(cors({
@@ -115,7 +116,7 @@ app.post('/api/auth/register', async (req, res) => {
   if (!email?.trim() || !password || !name?.trim() || !normalizedUsername) return res.status(400).json({ error: 'Họ tên, tên tài khoản, email và mật khẩu là bắt buộc.' })
   if (!/^[a-z0-9._-]{3,30}$/.test(normalizedUsername)) return res.status(400).json({ error: 'Tên tài khoản dùng 3-30 ký tự: chữ thường, số, ., _ hoặc -.' })
   if (password.length < 8) return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 8 ký tự.' })
-  if (role !== 'student') return res.status(400).json({ error: 'Chỉ cho phép đăng ký tài khoản học sinh.' })
+  if (!['student', 'teacher'].includes(role)) return res.status(400).json({ error: 'Vai trò đăng ký không hợp lệ.' })
   const data = readData()
   data.users ||= []
   if (data.users.some((user) => user.email.toLowerCase() === email.trim().toLowerCase())) return res.status(409).json({ error: 'Email đã được sử dụng.' })
@@ -394,9 +395,15 @@ ${sourceText.slice(0, 50000)}`
   } catch (error) { console.error('Exam conversion error:', error); res.status(502).json({ error: 'Không thể chuyển đổi đề thi từ tài liệu.' }) }
 }
 
-app.get('/api/classes', (_req, res) => {
+app.get('/api/classes', (req, res) => {
   const data = readData()
-  const classes = data.classes.map((classItem) => ({
+  const currentUser = data.users.find((user) => user.id === req.user.sub)
+  const visibleClasses = req.user.role === 'student'
+    ? data.classes.filter((classItem) => data.students.some((student) => student.classId === classItem.id && (student.email === currentUser?.email || student.id === currentUser?.studentCode)))
+    : req.user.role === 'teacher'
+      ? data.classes.filter((classItem) => classItem.teacherId === req.user.sub)
+      : data.classes
+  const classes = visibleClasses.map((classItem) => ({
     ...classItem,
     studentCount: data.students.filter((student) => student.classId === classItem.id).length,
     assignmentCount: data.assignments.filter((assignment) => assignment.classId === classItem.id).length,

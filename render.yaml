@@ -5,11 +5,17 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
+    disk:
+      name: exam-ai-data
+      mountPath: /opt/render/project/src/server
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 24
       - key: ALLOWED_ORIGINS
         value: https://smartstudent-ky69031f3-tranlocbtr99.vercel.app,https://smartstudent-94kq97cdo-tranlocb99.vercel.app,https://smartstudent-94kq97cdo-tranlocbtr99.vercel.app,https://smartstudent-omega.vercel.app,http://localhost:5173
+      - key: FRONTEND_URL
+        value: https://smartstudent-omega.vercel.app
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
