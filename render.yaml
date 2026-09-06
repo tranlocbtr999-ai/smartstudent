@@ -5,10 +5,6 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
-    disk:
-      name: exam-ai-data
-      mountPath: /opt/render/project/src/server
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 24
