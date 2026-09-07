@@ -194,7 +194,7 @@ function createAttendanceSession(data, classItem, timetableSession, expiresInMin
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'exam-ai-api', timestamp: new Date().toISOString() })
+  res.json({ ok: true, service: 'exam-ai-api', version: 'student-summary-v1', timestamp: new Date().toISOString() })
 })
 
 app.post('/api/auth/login', async (req, res) => {
