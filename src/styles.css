@@ -92,3 +92,4 @@ body { background: radial-gradient(circle at 15% 0%, #ffffff 0, #f7f9fd 42%, #ee
 .content-wrap { padding-top: 46px; }
 .page-heading h1 { font-size: 32px; }
 .muted, .breadcrumb, .class-header p { font-size: 14px; }
+.submission-link { display: block; margin-top: 5px; color: var(--green); font-size: 11px; font-weight: 700; }

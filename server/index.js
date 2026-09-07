@@ -369,7 +369,11 @@ app.post('/api/ai/generate-exam-from-file', upload.single('file'), async (req, r
       sourceText = result.text
       await parser.destroy()
     } else if (req.file.mimetype.includes('word') || req.file.originalname.toLowerCase().endsWith('.docx')) {
-      sourceText = (await mammoth.extractRawText({ buffer: req.file.buffer })).value
+      const result = await mammoth.convertToHtml({
+        buffer: req.file.buffer,
+        convertImage: mammoth.images.imgElement((image) => image.read('base64').then((data) => ({ src: `data:${image.contentType};base64,${data}` }))),
+      })
+      sourceText = result.value
     } else return res.status(415).json({ error: 'Chỉ hỗ trợ file .docx hoặc .pdf.' })
   } catch (error) {
     console.error('Document parsing error:', error)
@@ -486,11 +490,12 @@ Quy tắc bắt buộc:
 - Chỉ nhận diện đáp án đúng nếu tài liệu đánh dấu rõ bằng đáp án, ký hiệu, hoặc phần đáp án cuối tài liệu. Nếu không nhận diện được, đặt correctAnswer là null.
 - Không tự đoán đáp án.
 - Giữ giải thích nếu tài liệu có; nếu không có, để chuỗi rỗng.
+- Giữ nguyên nội dung ảnh, MathType, MathML và LaTeX trong câu hỏi/lựa chọn; không thay thế, diễn giải hoặc làm mất chúng. Nếu ảnh xuất hiện, giữ nguyên bằng chuỗi data URL hoặc thẻ HTML trong trường tương ứng.
 - Nếu câu không đủ 4 lựa chọn hoặc không phải trắc nghiệm, vẫn giữ câu đó nhưng dùng các lựa chọn đang có.
 ${instructions ? `Yêu cầu định dạng thêm: ${instructions}` : ''}
 Chỉ trả về JSON hợp lệ, không markdown, theo schema:
 {"title":"string","subject":"string","questions":[{"question":"string","options":["string"],"correctAnswer":0,"explanation":"string"}]}
-NỘI DUNG ĐỀ THI:
+NỘI DUNG ĐỀ THI (có thể chứa HTML, ảnh data URL, MathML, LaTeX hoặc MathType):
 ${sourceText.slice(0, 50000)}`
   try {
     const payload = await requestGemini(apiKey, prompt, { responseMimeType: 'application/json', temperature: 0 })
@@ -728,10 +733,14 @@ app.get('/api/classes/:classId/assignments', (req, res) => {
   res.json({ data: result.data.assignments.filter((assignment) => assignment.classId === result.classItem.id && canViewAssignment(result.data, assignment, req.user)) })
 })
 
-app.post('/api/classes/:classId/assignments', allowRoles('admin', 'teacher'), (req, res) => {
+app.post('/api/classes/:classId/assignments', allowRoles('admin', 'teacher'), upload.single('file'), (req, res) => {
   const result = requireClassManager(req, res)
   if (!result) return
-  const { title, type = 'homework', dueAt, studentIds = [] } = req.body
+  const { title, type = 'homework', dueAt } = req.body
+  let studentIds = req.body.studentIds || []
+  if (typeof studentIds === 'string') {
+    try { studentIds = JSON.parse(studentIds) } catch { studentIds = studentIds.split(',').filter(Boolean) }
+  }
   if (!title || !dueAt) return res.status(400).json({ error: 'title và dueAt là bắt buộc.' })
   if (!['homework', 'exam', 'document'].includes(type)) return res.status(400).json({ error: 'Loại hoạt động không hợp lệ.' })
   if (!Array.isArray(studentIds)) return res.status(400).json({ error: 'studentIds phải là một mảng.' })
@@ -753,12 +762,40 @@ app.post('/api/classes/:classId/assignments', allowRoles('admin', 'teacher'), (r
     total: targetStudentIds.length,
     createdBy: req.user.sub,
     createdAt: new Date().toISOString(),
+    attachment: req.file ? { name: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, data: req.file.buffer.toString('base64') } : null,
   }
   result.data.assignments.push(assignment)
   result.data.notifications ||= []
   result.data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: targetType, classId: result.classItem.id, studentIds: targetStudentIds, type: 'assignment', title: type === 'exam' ? 'Đề thi mới' : 'Bài tập mới', message: `${assignment.title} đã được giao.`, isRead: false, createdAt: new Date().toISOString() })
   writeData(result.data)
   res.status(201).json({ data: assignment })
+})
+
+app.get('/api/assignments/:assignmentId/submissions', allowRoles('admin', 'teacher'), (req, res) => {
+  const data = readData()
+  const assignment = (data.assignments || []).find((item) => item.id === req.params.assignmentId)
+  if (!assignment) return res.status(404).json({ error: 'Không tìm thấy bài tập.' })
+  const classItem = findClass(data, assignment.classId)
+  if (!classItem || (req.user.role !== 'admin' && classItem.teacherId !== req.user.sub)) return res.status(403).json({ error: 'Bạn không có quyền xem bài nộp.' })
+  res.json({ data: (data.submissions || []).filter((item) => item.assignmentId === assignment.id).map(({ file, ...item }) => ({ ...item, file: file ? { name: file.name, mimeType: file.mimeType, size: file.size, data: file.data } : null })) })
+})
+
+app.post('/api/assignments/:assignmentId/submissions', allowRoles('student'), upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Vui lòng chụp hoặc tải lên bài làm.' })
+  const data = readData()
+  const assignment = (data.assignments || []).find((item) => item.id === req.params.assignmentId)
+  if (!assignment || !canViewAssignment(data, assignment, req.user)) return res.status(404).json({ error: 'Bài tập không tồn tại hoặc không dành cho bạn.' })
+  if (new Date(assignment.dueAt).getTime() < Date.now()) return res.status(400).json({ error: 'Bài tập đã quá hạn nộp.' })
+  const user = data.users.find((item) => item.id === req.user.sub)
+  const student = data.students.find((item) => item.id === user?.studentCode || item.email?.toLowerCase() === user?.email?.toLowerCase())
+  if (!student) return res.status(403).json({ error: 'Không tìm thấy hồ sơ học sinh.' })
+  data.submissions ||= []
+  const submission = { id: `submission-${randomUUID()}`, assignmentId: assignment.id, studentId: student.id, studentName: student.name, file: { name: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size, data: req.file.buffer.toString('base64') }, submittedAt: new Date().toISOString() }
+  data.submissions = data.submissions.filter((item) => !(item.assignmentId === assignment.id && item.studentId === student.id))
+  data.submissions.push(submission)
+  assignment.submitted = data.submissions.filter((item) => item.assignmentId === assignment.id).length
+  writeData(data)
+  res.status(201).json({ data: { ...submission, file: { name: submission.file.name, mimeType: submission.file.mimeType, size: submission.file.size } } })
 })
 
 app.get('/api/notifications', (req, res) => {
@@ -782,5 +819,5 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Lỗi máy chủ.' })
 })
 
-if (!existsSync(dataPath)) writeData({ users: [], classes: [], students: [], timetableSessions: [], attendanceSessions: [], attendanceRecords: [], assignments: [], notifications: [], exams: [], attempts: [], passwordResetTokens: [] })
+if (!existsSync(dataPath)) writeData({ users: [], classes: [], students: [], timetableSessions: [], attendanceSessions: [], attendanceRecords: [], assignments: [], submissions: [], notifications: [], exams: [], attempts: [], passwordResetTokens: [] })
 app.listen(port, () => console.log(`ExamAI API đang chạy tại http://localhost:${port}`))
