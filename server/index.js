@@ -21,6 +21,7 @@ const googleClientId = process.env.GOOGLE_CLIENT_ID || ''
 const googleClient = new OAuth2Client(googleClientId)
 const appUrl = process.env.APP_URL || 'http://localhost:5173'
 const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
+const geminiFallbackModels = [geminiModel, 'gemini-3.6-flash', 'gemini-flash-latest'].filter((model, index, models) => models.indexOf(model) === index)
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
@@ -305,6 +306,33 @@ app.post('/api/admin/users', authenticate, allowRoles('admin'), async (req, res)
 
 app.use('/api', authenticate)
 
+async function requestGemini(apiKey, prompt, generationConfig) {
+  let lastError = 'Gemini không thể xử lý yêu cầu.'
+  for (const model of geminiFallbackModels) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (response.ok) return payload
+        lastError = payload.error?.message || lastError
+        const retryable = response.status === 429 || response.status >= 500 || /high demand|temporar|overload/i.test(lastError)
+        if (!retryable) break
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700))
+      } catch (error) {
+        lastError = error.message || lastError
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700))
+      }
+    }
+  }
+  const error = new Error(lastError)
+  error.status = 502
+  throw error
+}
+
 app.post('/api/ai/generate-exam', async (req, res) => {
   const { topic, questionCount = 10, difficulty = 'medium', language = 'Vietnamese', instructions = '' } = req.body
   const apiKey = process.env.GEMINI_API_KEY
@@ -319,13 +347,7 @@ Chỉ trả về JSON hợp lệ, không markdown, theo schema:
 {"title":"string","subject":"string","questions":[{"question":"string","options":["string","string","string","string"],"correctAnswer":0,"explanation":"string"}]}
 correctAnswer là index từ 0 đến 3. Mỗi câu phải có đúng 4 lựa chọn và chỉ một đáp án đúng.`
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0.4 } }),
-    })
-    const payload = await response.json()
-    if (!response.ok) return res.status(502).json({ error: payload.error?.message || 'Gemini không thể tạo đề.' })
+    const payload = await requestGemini(apiKey, prompt, { responseMimeType: 'application/json', temperature: 0.4 })
     const text = payload.candidates?.[0]?.content?.parts?.[0]?.text
     if (!text) return res.status(502).json({ error: 'Gemini trả về dữ liệu rỗng.' })
     const exam = JSON.parse(text.replace(/^```json\s*|\s*```$/g, '').trim())
@@ -445,9 +467,7 @@ Chỉ trả về JSON hợp lệ theo schema: {"title":"string","subject":"strin
 NỘI DUNG TÀI LIỆU:
 ${topic}`
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0.4 } }) })
-    const payload = await response.json()
-    if (!response.ok) return res.status(502).json({ error: payload.error?.message || 'Gemini không thể tạo đề.' })
+    const payload = await requestGemini(apiKey, prompt, { responseMimeType: 'application/json', temperature: 0.4 })
     const text = payload.candidates?.[0]?.content?.parts?.[0]?.text
     const exam = JSON.parse(text.replace(/^```json\s*|\s*```$/g, '').trim())
     if (!exam.title || !Array.isArray(exam.questions)) return res.status(502).json({ error: 'Định dạng đề thi từ AI không hợp lệ.' })
@@ -473,9 +493,7 @@ Chỉ trả về JSON hợp lệ, không markdown, theo schema:
 NỘI DUNG ĐỀ THI:
 ${sourceText.slice(0, 50000)}`
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } }) })
-    const payload = await response.json()
-    if (!response.ok) return res.status(502).json({ error: payload.error?.message || 'Gemini không thể chuyển đổi đề.' })
+    const payload = await requestGemini(apiKey, prompt, { responseMimeType: 'application/json', temperature: 0 })
     const text = payload.candidates?.[0]?.content?.parts?.[0]?.text
     if (!text) return res.status(502).json({ error: 'Gemini trả về dữ liệu rỗng.' })
     const exam = JSON.parse(text.replace(/^```json\s*|\s*```$/g, '').trim())
