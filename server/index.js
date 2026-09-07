@@ -703,6 +703,20 @@ app.get('/api/classes/:classId/students', (req, res) => {
   res.json({ data: result.data.students.filter((student) => student.classId === result.classItem.id) })
 })
 
+app.get('/api/classes/:classId/students/:studentId/summary', allowRoles('admin', 'teacher'), (req, res) => {
+  const result = requireClass(req, res)
+  if (!result) return
+  if (!canViewClass(result.data, result.classItem, req.user)) return res.status(403).json({ error: 'Bạn không quản lý lớp học này.' })
+  const student = result.data.students.find((item) => item.classId === result.classItem.id && item.id === req.params.studentId)
+  if (!student) return res.status(404).json({ error: 'Không tìm thấy học sinh.' })
+  const assignments = (result.data.assignments || []).filter((item) => item.classId === result.classItem.id && (item.targetType !== 'individual' || item.targetStudentIds?.includes(student.id)))
+  const submissions = (result.data.submissions || []).filter((item) => item.studentId === student.id && assignments.some((assignment) => assignment.id === item.assignmentId))
+  const attempts = (result.data.attempts || []).filter((item) => item.studentId === student.id && assignments.some((assignment) => assignment.examId === item.examId))
+  const completedIds = new Set([...submissions.map((item) => item.assignmentId), ...attempts.map((item) => assignments.find((assignment) => assignment.examId === item.examId)?.id)])
+  const scores = attempts.map((item) => ({ examId: item.examId, score: item.score, correctCount: item.correctCount, totalQuestions: item.totalQuestions, submittedAt: item.submittedAt }))
+  res.json({ data: { student, assignmentCount: assignments.length, completedCount: completedIds.size, incompleteCount: Math.max(0, assignments.length - completedIds.size), averageScore: scores.length ? Math.round(scores.reduce((sum, item) => sum + item.score, 0) / scores.length * 100) / 100 : null, scoreHistory: scores, submissions: submissions.map(({ file, ...item }) => item) } })
+})
+
 app.post('/api/classes/:classId/students', allowRoles('admin', 'teacher'), (req, res) => {
   const result = requireClassManager(req, res)
   if (!result) return

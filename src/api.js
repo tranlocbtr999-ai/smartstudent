@@ -32,6 +32,7 @@ export const api = {
   getClasses: () => request('/classes'),
   createClass: (body) => request('/classes', { method: 'POST', body: JSON.stringify(body) }),
   getStudents: (classId) => request(`/classes/${classId}/students`),
+  getStudentSummary: (classId, studentId) => request(`/classes/${classId}/students/${studentId}/summary`),
   getClass: (classId) => request(`/classes/${classId}`),
   addStudent: (classId, body) => request(`/classes/${classId}/students`, { method: 'POST', body: JSON.stringify(body) }),
   getTimetable: () => request('/timetable'),
