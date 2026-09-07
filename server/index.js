@@ -637,6 +637,28 @@ app.post('/api/classes', allowRoles('admin', 'teacher'), (req, res) => {
   }
   const classItem = { id: `class-${randomUUID()}`, code: code.trim().toUpperCase(), name: name.trim(), subject, room, schedule, teacherId: req.user.role === 'admin' ? (req.body.teacherId || req.user.sub) : req.user.sub, createdAt: new Date().toISOString() }
   data.classes.push(classItem)
+  const scheduleMatch = schedule.match(/(?:thứ\s*)?([2-7]|chủ\s*nhật)[^\d]*(\d{1,2})[:h](\d{2})\s*(?:-|đến|–)\s*(\d{1,2})[:h](\d{2})/i)
+  if (scheduleMatch) {
+    const day = scheduleMatch[1].toLowerCase().includes('chủ') ? 0 : Number(scheduleMatch[1]) - 1
+    const startHour = Number(scheduleMatch[2])
+    const startMinute = Number(scheduleMatch[3])
+    const endHour = Number(scheduleMatch[4])
+    const endMinute = Number(scheduleMatch[5])
+    const first = new Date()
+    first.setHours(startHour, startMinute, 0, 0)
+    first.setDate(first.getDate() + ((day - first.getDay() + 7) % 7))
+    if (first <= new Date()) first.setDate(first.getDate() + 7)
+    data.timetableSessions ||= []
+    for (let week = 0; week < 12; week += 1) {
+      const startsAt = new Date(first)
+      startsAt.setDate(first.getDate() + week * 7)
+      const endsAt = new Date(startsAt)
+      endsAt.setHours(endHour, endMinute, 0, 0)
+      data.timetableSessions.push({ id: `timetable-${randomUUID()}`, classId: classItem.id, title: `${classItem.name} - Tuần ${week + 1}`, subject: classItem.subject, room: classItem.room, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), notes: 'Tạo tự động từ lịch học của lớp.', createdBy: classItem.teacherId, createdAt: new Date().toISOString() })
+    }
+    data.notifications ||= []
+    data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: 'class', classId: classItem.id, type: 'timetable', title: 'Lịch học mới', message: `Đã tạo tự động 12 buổi học cho lớp ${classItem.code}.`, isRead: false, createdAt: new Date().toISOString() })
+  }
   writeData(data)
   res.status(201).json({ data: classItem })
 })
@@ -659,11 +681,11 @@ app.get('/api/classes/:classId/students', (req, res) => {
 app.post('/api/classes/:classId/students', allowRoles('admin', 'teacher'), (req, res) => {
   const result = requireClassManager(req, res)
   if (!result) return
-  const { name, email = '' } = req.body
+  const { name, email = '', phone = '', zalo = '' } = req.body
   if (!name) return res.status(400).json({ error: 'name là bắt buộc.' })
   const studentId = req.body.id?.trim().toUpperCase() || `HS${String(result.data.students.length + 1).padStart(5, '0')}`
   if (result.data.students.some((student) => student.id === studentId)) return res.status(409).json({ error: 'Mã học sinh đã tồn tại.' })
-  const student = { id: studentId, name: name.trim(), email, classId: result.classItem.id, status: 'present', score: null }
+  const student = { id: studentId, name: name.trim(), email, phone: phone.trim(), zalo: zalo.trim(), classId: result.classItem.id, status: 'present', score: null }
   result.data.students.push(student)
   writeData(result.data)
   res.status(201).json({ data: student })

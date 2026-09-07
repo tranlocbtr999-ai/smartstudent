@@ -93,3 +93,6 @@ body { background: radial-gradient(circle at 15% 0%, #ffffff 0, #f7f9fd 42%, #ee
 .page-heading h1 { font-size: 32px; }
 .muted, .breadcrumb, .class-header p { font-size: 14px; }
 .submission-link { display: block; margin-top: 5px; color: var(--green); font-size: 11px; font-weight: 700; }
+.student-contact { display: flex; gap: 8px; margin-top: 5px; }
+.student-contact a { color: var(--green); font-size: 11px; font-weight: 700; text-decoration: none; }
+.student-contact a:hover { text-decoration: underline; }
