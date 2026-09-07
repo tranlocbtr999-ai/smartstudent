@@ -98,8 +98,8 @@
       "id": "record-f29772f9-8ad9-44d6-ae23-22a300e7e437",
       "sessionId": "attendance-54738f74-a1bc-41e4-bea1-044392460bc9",
       "studentId": "HS00128",
-      "status": "absent",
-      "checkedAt": null
+      "status": "late",
+      "checkedAt": "2026-09-06T19:27:42.515Z"
     },
     {
       "id": "record-cbc279df-7427-4473-9342-675adabe2aa7",

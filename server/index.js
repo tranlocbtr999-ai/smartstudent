@@ -102,11 +102,12 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.post('/api/auth/login', async (req, res) => {
-  const { identifier, email, password } = req.body
+  const { identifier, email, password, role } = req.body
   const data = readData()
   const loginIdentifier = String(identifier || email || '').trim().toLowerCase()
   const user = (data.users || []).find((item) => item.email.toLowerCase() === loginIdentifier || item.username?.toLowerCase() === loginIdentifier)
   if (!user || !(await bcrypt.compare(password || '', user.passwordHash))) return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' })
+  if (role && user.role !== role) return res.status(403).json({ error: `Tài khoản này là ${user.role === 'teacher' ? 'giáo viên' : user.role === 'student' ? 'học sinh' : 'quản trị viên'}, không phải loại tài khoản đã chọn.` })
   res.json({ data: { token: issueToken(user), user: publicUser(user) } })
 })
 
@@ -121,7 +122,7 @@ app.post('/api/auth/register', async (req, res) => {
   data.users ||= []
   if (data.users.some((user) => user.email.toLowerCase() === email.trim().toLowerCase())) return res.status(409).json({ error: 'Email đã được sử dụng.' })
   if (data.users.some((user) => user.username?.toLowerCase() === normalizedUsername)) return res.status(409).json({ error: 'Tên tài khoản đã được sử dụng.' })
-  const user = { id: `student-${randomUUID()}`, username: normalizedUsername, email: email.trim().toLowerCase(), name: name.trim(), phone: phone.trim(), studentCode: studentCode.trim(), role: 'student', passwordHash: await bcrypt.hash(password, 12), createdAt: new Date().toISOString() }
+  const user = { id: `${role}-${randomUUID()}`, username: normalizedUsername, email: email.trim().toLowerCase(), name: name.trim(), phone: phone.trim(), studentCode: role === 'student' ? studentCode.trim() : '', role, passwordHash: await bcrypt.hash(password, 12), createdAt: new Date().toISOString() }
   data.users.push(user)
   writeData(data)
   res.status(201).json({ data: { token: issueToken(user), user: publicUser(user) } })
@@ -454,7 +455,11 @@ app.post('/api/classes/:classId/students', allowRoles('admin', 'teacher'), (req,
 app.get('/api/classes/:classId/attendance', (req, res) => {
   const result = requireClass(req, res)
   if (!result) return
-  const sessions = result.data.attendanceSessions.filter((session) => session.classId === result.classItem.id)
+  const now = Date.now()
+  const sessions = result.data.attendanceSessions.filter((session) => session.classId === result.classItem.id).map((session) => ({
+    ...session,
+    status: session.status === 'active' && new Date(session.expiresAt).getTime() <= now ? 'expired' : session.status,
+  }))
   const records = result.data.attendanceRecords.filter((record) => sessions.some((session) => session.id === record.sessionId))
   res.json({ data: { sessions, records } })
 })
@@ -464,6 +469,7 @@ app.post('/api/classes/:classId/attendance/sessions', allowRoles('admin', 'teach
   if (!result) return
   const expiresInMinutes = Math.max(1, Number(req.body.expiresInMinutes || 2))
   const now = new Date()
+  result.data.attendanceSessions.filter((item) => item.classId === result.classItem.id && item.status === 'active').forEach((item) => { item.status = 'closed' })
   const session = { id: `attendance-${randomUUID()}`, classId: result.classItem.id, code: String(Math.floor(100000 + Math.random() * 900000)), startsAt: now.toISOString(), expiresAt: new Date(now.getTime() + expiresInMinutes * 60000).toISOString(), status: 'active' }
   result.data.attendanceSessions.push(session)
   result.data.students.filter((student) => student.classId === result.classItem.id).forEach((student) => result.data.attendanceRecords.push({ id: `record-${randomUUID()}`, sessionId: session.id, studentId: student.id, status: 'absent', checkedAt: null }))
@@ -475,11 +481,33 @@ app.patch('/api/attendance/:recordId', allowRoles('admin', 'teacher'), (req, res
   const data = readData()
   const record = data.attendanceRecords.find((item) => item.id === req.params.recordId)
   if (!record) return res.status(404).json({ error: 'Không tìm thấy bản ghi điểm danh.' })
+  const session = data.attendanceSessions.find((item) => item.id === record.sessionId)
+  const classItem = session && findClass(data, session.classId)
+  if (!session || !classItem || (req.user.role !== 'admin' && classItem.teacherId !== req.user.sub)) return res.status(403).json({ error: 'Bạn không quản lý bản ghi điểm danh này.' })
   if (!['present', 'late', 'absent', 'excused'].includes(req.body.status)) return res.status(400).json({ error: 'Trạng thái không hợp lệ.' })
   record.status = req.body.status
   record.checkedAt = new Date().toISOString()
   writeData(data)
   res.json({ data: record })
+})
+
+app.post('/api/attendance/check-in', authenticate, allowRoles('student'), (req, res) => {
+  const code = String(req.body.code || '').trim()
+  if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: 'Mã điểm danh phải gồm 6 chữ số.' })
+  const data = readData()
+  const now = Date.now()
+  const session = data.attendanceSessions.find((item) => item.code === code && item.status === 'active' && new Date(item.expiresAt).getTime() > now)
+  if (!session) return res.status(404).json({ error: 'Mã điểm danh không tồn tại hoặc đã hết hạn.' })
+  const classItem = findClass(data, session.classId)
+  const user = data.users.find((item) => item.id === req.user.sub)
+  const student = data.students.find((item) => item.id === user?.studentCode || item.email?.toLowerCase() === user?.email?.toLowerCase())
+  if (!student || student.classId !== classItem?.id) return res.status(403).json({ error: 'Bạn chưa được xếp vào lớp của buổi học này.' })
+  const record = data.attendanceRecords.find((item) => item.sessionId === session.id && item.studentId === student.id)
+  if (!record) return res.status(404).json({ error: 'Không tìm thấy bản ghi điểm danh của bạn.' })
+  record.status = 'present'
+  record.checkedAt = new Date().toISOString()
+  writeData(data)
+  res.json({ data: { record, session, classItem } })
 })
 
 app.get('/api/classes/:classId/assignments', (req, res) => {

@@ -37,6 +37,7 @@ export const api = {
   getAttendance: (classId) => request(`/classes/${classId}/attendance`),
   createAttendanceSession: (classId, body = {}) => request(`/classes/${classId}/attendance/sessions`, { method: 'POST', body: JSON.stringify(body) }),
   updateAttendance: (recordId, status) => request(`/attendance/${recordId}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  checkInAttendance: (code) => request('/attendance/check-in', { method: 'POST', body: JSON.stringify({ code }) }),
   getAssignments: (classId) => request(`/classes/${classId}/assignments`),
   createAssignment: (classId, body) => request(`/classes/${classId}/assignments`, { method: 'POST', body: JSON.stringify(body) }),
   getNotifications: () => request('/notifications'),
