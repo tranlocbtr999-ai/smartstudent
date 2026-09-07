@@ -123,7 +123,7 @@ function App() {
             <div className="class-cards">{classes.filter((item) => `${item.code} ${item.name}`.toLowerCase().includes(searchTerm.toLowerCase())).map((item) => <button key={item.code} className={`class-card ${item.code === selectedCode ? 'selected' : ''}`} onClick={() => { setSelectedCode(item.code); setActiveTab('overview') }}><span className={`class-dot ${item.accent}`} /><span className="class-info"><strong>{item.code}</strong><small>{item.name}</small></span><span className="class-count">{item.students} <small>HS</small></span></button>)}{!classes.some((item) => `${item.code} ${item.name}`.toLowerCase().includes(searchTerm.toLowerCase())) && <p className="interaction-hint">Không tìm thấy lớp phù hợp.</p>}</div>
           </section>
 
-          <section className="class-header"><div><div className="title-line"><h2>{selectedClass.code}</h2><span className="live-badge"><span /> Đang hoạt động</span></div><p>{selectedClass.name} <span className="divider">·</span> {selectedClass.schedule || 'Chưa có lịch học'} <span className="divider">·</span> {selectedClass.room || 'Chưa có phòng'}</p></div>{user.role !== 'student' && <button className="secondary-button"><Settings size={16} /> Quản lý lớp</button>}</section>
+          <section className="class-header"><div><div className="title-line"><h2>{selectedClass.code}</h2><span className="live-badge"><span /> Đang hoạt động</span></div><p>{selectedClass.name} <span className="divider">·</span> {selectedClass.schedule || 'Chưa có lịch học'} <span className="divider">·</span> {selectedClass.room || 'Chưa có phòng'}</p></div>{user.role !== 'student' && <button className="secondary-button" onClick={() => setActiveTab('class-manage')}><Settings size={16} /> Quản lý lớp</button>}</section>
 
           <div className="tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}>{tab.label}{tab.id === 'assignments' && <span className="tab-count">4</span>}</button>)}</div>
 
@@ -131,6 +131,7 @@ function App() {
           {activeTab === 'students' && <Students classId={selectedClass.id} />}
           {activeTab === 'attendance' && <Attendance classId={selectedClass.id} />}
           {activeTab === 'timetable' && <Timetable classes={classes} />}
+          {activeTab === 'class-manage' && <ClassManagement classItem={selectedClass} onUpdated={(updated) => { setClasses((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item)); setSelectedCode(updated.code); setActiveTab('overview') }} />}
           {activeTab === 'assignments' && <Assignments classId={selectedClass.id} />}
           {activeTab === 'exams' && <ExamRunner />}
           {activeTab === 'admin' && user.role === 'admin' && <AdminUsers />}
@@ -215,6 +216,23 @@ function localDateTime(value) {
   const date = new Date(value)
   const offset = date.getTimezoneOffset()
   return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16)
+}
+
+function ClassManagement({ classItem, onUpdated }) {
+  const [form, setForm] = useState({ code: classItem.code, name: classItem.name, subject: classItem.subject || '', room: classItem.room || '', schedule: classItem.schedule || '' })
+  const [requests, setRequests] = useState([])
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  async function loadRequests() { try { setRequests(await api.getJoinRequests(classItem.id)) } catch (requestError) { setError(requestError.message) } }
+  useEffect(() => { loadRequests() }, [classItem.id])
+  async function save(event) {
+    event.preventDefault()
+    try { const updated = await api.updateClass(classItem.id, form); setMessage('Đã cập nhật thông tin lớp học.'); onUpdated(updated); await loadRequests() } catch (requestError) { setError(requestError.message) }
+  }
+  async function review(request, status) {
+    try { await api.reviewJoinRequest(classItem.id, request.id, status); setRequests((current) => current.filter((item) => item.id !== request.id)); setMessage(status === 'approved' ? 'Đã duyệt học sinh vào lớp.' : 'Đã từ chối yêu cầu.') } catch (requestError) { setError(requestError.message) }
+  }
+  return <section className="settings-grid"><section className="panel"><span className="section-kicker">QUẢN LÝ LỚP HỌC</span><h3>Thông tin lớp</h3><form className="auth-form settings-form" onSubmit={save}><label>Mã lớp<input value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} required /></label><label>Tên lớp<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label><label>Môn học<input value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} /></label><label>Phòng học<input value={form.room} onChange={(event) => setForm({ ...form, room: event.target.value })} /></label><label>Lịch học<input value={form.schedule} onChange={(event) => setForm({ ...form, schedule: event.target.value })} placeholder="Thứ 2, 18:00 - 20:00" /></label><button className="primary-button">Lưu thay đổi</button></form>{message && <p className="success-alert">{message}</p>}{error && <p className="api-alert">{error}</p>}</section><section className="panel"><span className="section-kicker">CHỜ PHÊ DUYỆT</span><h3>{requests.length} yêu cầu vào lớp</h3>{requests.length ? requests.map((request) => <div className="assignment-row" key={request.id}><div><strong>{request.studentName}</strong><small>{request.studentCode || 'Chưa có mã học sinh'}</small></div><div className="modal-actions"><button className="primary-button" onClick={() => review(request, 'approved')}>Duyệt</button><button className="secondary-button" onClick={() => review(request, 'rejected')}>Từ chối</button></div></div>) : <p className="interaction-hint">Chưa có yêu cầu mới.</p>}</section></section>
 }
 
 function Timetable({ classes }) {
@@ -369,6 +387,8 @@ function StudentPortal({ user, onLogout }) {
   const [attendanceMessage, setAttendanceMessage] = useState('')
   const [notifications, setNotifications] = useState([])
   const [selectedAssignment, setSelectedAssignment] = useState(null)
+  const [joinCode, setJoinCode] = useState('')
+  const [joinMessage, setJoinMessage] = useState('')
   const [view, setView] = useState('home')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -403,6 +423,9 @@ function StudentPortal({ user, onLogout }) {
     } catch (requestError) {
       setAttendanceMessage(requestError.message)
     }
+    async function requestJoin() {
+      try { await api.requestJoinByCode(joinCode); setJoinMessage('Đã gửi yêu cầu. Vui lòng chờ giáo viên phê duyệt.'); setJoinCode('') } catch (requestError) { setJoinMessage(requestError.message) }
+    }
   }
 
   if (view === 'exam') return <main className="auth-screen student-portal-screen"><section className="student-portal"><ExamRunner user={user} onBack={() => setView('home')} /></section></main>
@@ -414,6 +437,7 @@ function StudentPortal({ user, onLogout }) {
     {error && <p className="api-alert">{error}</p>}
     {loading ? <div className="boot-state">Đang tải không gian học tập...</div> : <div className="student-portal-grid">
       <section className="panel"><div className="panel-head"><div><span className="section-kicker">LỚP HỌC CỦA TÔI</span><h3>{classes.length} lớp</h3></div><Users size={20} /></div>{classes.length ? classes.map((classItem) => <div className="assignment-row" key={classItem.id}><div className="assignment-icon blue"><BookOpen size={19} /></div><div><strong>{classItem.code}</strong><small>{classItem.name} · {classItem.schedule || 'Chưa có lịch học'}</small></div><span className="assignment-progress blue">{classItem.studentCount} HS</span></div>) : <p className="interaction-hint">Bạn chưa được thêm vào lớp nào.</p>}</section>
+      <section className="panel"><div className="panel-head"><div><span className="section-kicker">THAM GIA LỚP</span><h3>Nhập mã lớp</h3></div><Users size={20} /></div><div className="inline-form"><input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="Ví dụ: KTVM-K60" /><button className="primary-button" onClick={requestJoin} disabled={!joinCode.trim()}>Gửi yêu cầu</button></div>{joinMessage && <p className={joinMessage.startsWith('Đã ') ? 'success-alert' : 'api-alert'}>{joinMessage}</p>}<p className="muted">Giáo viên sẽ phê duyệt trước khi lớp xuất hiện trong tài khoản của bạn.</p></section>
       <section className="panel"><div className="panel-head"><div><span className="section-kicker">BÀI KIỂM TRA</span><h3>{exams.length} bài có thể làm</h3></div><ClipboardCheck size={20} /></div>{exams.length ? exams.map((exam) => <button className="exam-list-item exam-list-button" key={exam.id} onClick={() => setView('exam')}><div className="assignment-icon orange"><ClipboardCheck size={18} /></div><span><strong>{exam.title}</strong><small>{exam.questionCount} câu · {exam.durationMinutes} phút</small></span><span className="row-arrow">→</span></button>) : <p className="interaction-hint">Chưa có bài kiểm tra được giao.</p>}</section>
       <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">ĐIỂM DANH THEO BUỔI</span><h3>{attendanceSessions.length ? 'Có buổi đang mở' : 'Chưa có buổi đang mở'}</h3></div><CalendarDays size={20} /></div><p className="muted">Nhập mã 6 chữ số do giáo viên cung cấp để xác nhận có mặt.</p><div className="inline-form"><input value={attendanceCode} onChange={(event) => setAttendanceCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="Mã điểm danh" aria-label="Mã điểm danh" /><button className="primary-button" onClick={checkIn} disabled={attendanceCode.length !== 6}>Xác nhận có mặt</button></div>{attendanceSessions.map((session) => <div className="assignment-row" key={session.id}><div className="assignment-icon blue"><Clock3 size={19} /></div><div><strong>Buổi học đang mở</strong><small>Hết hạn lúc {new Date(session.expiresAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</small></div><span className="assignment-progress blue">Mã 6 số</span></div>)}{attendanceMessage && <p className={attendanceMessage.startsWith('Đã ') ? 'success-alert' : 'api-alert'}>{attendanceMessage}</p>}</section>
       <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">THỜI KHÓA BIỂU</span><h3>{timetableItems.length} buổi học</h3></div><Clock3 size={20} /></div>{timetableItems.length ? <div className="timetable-list">{timetableItems.map((item) => <div className="timetable-row" key={item.id}><div className="timetable-date"><strong>{new Date(item.startsAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}</strong><small>{new Date(item.startsAt).toLocaleDateString('vi-VN', { weekday: 'short' })}</small></div><div className="timetable-copy"><strong>{item.title}</strong><small>{item.classCode} · {new Date(item.startsAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} - {new Date(item.endsAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · {item.room || 'Chưa có phòng'}</small></div>{item.attendanceSession?.status === 'active' && <span className="live-badge"><span /> Đang mở</span>}</div>)}</div> : <p className="interaction-hint">Chưa có lịch học được công bố.</p>}</section>

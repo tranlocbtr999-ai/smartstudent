@@ -42,7 +42,7 @@ app.use(cors({
 app.use(express.json())
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
 
-const emptyData = () => ({ users: [], classes: [], students: [], timetableSessions: [], attendanceSessions: [], attendanceRecords: [], assignments: [], submissions: [], notifications: [], exams: [], attempts: [], passwordResetTokens: [] })
+const emptyData = () => ({ users: [], classes: [], students: [], classJoinRequests: [], timetableSessions: [], attendanceSessions: [], attendanceRecords: [], assignments: [], submissions: [], notifications: [], exams: [], attempts: [], passwordResetTokens: [] })
 
 function normalizeData(data) {
   const defaults = emptyData()
@@ -640,7 +640,7 @@ app.get('/api/classes', (req, res) => {
   const data = readData()
   const currentUser = data.users.find((user) => user.id === req.user.sub)
   const visibleClasses = req.user.role === 'student'
-    ? data.classes.filter((classItem) => data.students.some((student) => student.classId === classItem.id && (student.email === currentUser?.email || student.id === currentUser?.studentCode)))
+    ? data.classes.filter((classItem) => data.students.some((student) => student.classId === classItem.id && (student.userId === req.user.sub || student.email === currentUser?.email || student.id === currentUser?.studentCode)))
     : req.user.role === 'teacher'
       ? data.classes.filter((classItem) => classItem.teacherId === req.user.sub)
       : data.classes
@@ -694,6 +694,80 @@ app.get('/api/classes/:classId', (req, res) => {
   const { data, classItem } = result
   if (!canViewClass(data, classItem, req.user)) return res.status(403).json({ error: 'Bạn không thuộc lớp học này.' })
   res.json({ data: { ...classItem, studentCount: data.students.filter((student) => student.classId === classItem.id).length, assignmentCount: data.assignments.filter((assignment) => assignment.classId === classItem.id).length, sessionCount: data.attendanceSessions.filter((session) => session.classId === classItem.id).length } })
+})
+
+app.patch('/api/classes/:classId', allowRoles('admin', 'teacher'), (req, res) => {
+  const result = requireClassManager(req, res)
+  if (!result) return
+  const { code, name, subject, room, schedule } = req.body
+  if (!name?.trim() || !code?.trim()) return res.status(400).json({ error: 'Tên lớp và mã lớp là bắt buộc.' })
+  const normalizedCode = code.trim().toUpperCase()
+  if (result.data.classes.some((item) => item.id !== result.classItem.id && item.code === normalizedCode)) return res.status(409).json({ error: 'Mã lớp đã tồn tại.' })
+  Object.assign(result.classItem, { code: normalizedCode, name: name.trim(), subject: String(subject || '').trim(), room: String(room || '').trim(), schedule: String(schedule || '').trim(), updatedAt: new Date().toISOString() })
+  result.data.notifications ||= []
+  result.data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: 'class', classId: result.classItem.id, type: 'class-update', title: 'Lớp học được cập nhật', message: `Thông tin lớp ${result.classItem.code} đã được cập nhật.`, isRead: false, createdAt: new Date().toISOString() })
+  writeData(result.data)
+  res.json({ data: result.classItem })
+})
+
+app.get('/api/classes/:classId/join-requests', allowRoles('admin', 'teacher'), (req, res) => {
+  const result = requireClassManager(req, res)
+  if (!result) return
+  res.json({ data: (result.data.classJoinRequests || []).filter((item) => item.classId === result.classItem.id && item.status === 'pending') })
+})
+
+app.post('/api/classes/:classId/join-requests', allowRoles('student'), (req, res) => {
+  const result = requireClass(req, res)
+  if (!result) return
+  const data = result.data
+  const existing = (data.classJoinRequests || []).find((item) => item.classId === result.classItem.id && item.userId === req.user.sub && item.status === 'pending')
+  if (existing) return res.status(409).json({ error: 'Bạn đã gửi yêu cầu vào lớp này.' })
+  if (data.students.some((item) => item.classId === result.classItem.id && item.userId === req.user.sub)) return res.status(409).json({ error: 'Bạn đã ở trong lớp này.' })
+  const account = data.users.find((item) => item.id === req.user.sub)
+  data.classJoinRequests ||= []
+  const request = { id: `join-${randomUUID()}`, classId: result.classItem.id, userId: req.user.sub, studentCode: account?.studentCode || '', studentName: account?.name || req.user.name, status: 'pending', createdAt: new Date().toISOString() }
+  data.classJoinRequests.push(request)
+  data.notifications ||= []
+  data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: 'teacher', classId: result.classItem.id, type: 'join-request', title: 'Yêu cầu vào lớp mới', message: `${request.studentName} muốn tham gia lớp ${result.classItem.code}.`, isRead: false, createdAt: new Date().toISOString() })
+  writeData(data)
+  res.status(201).json({ data: request })
+})
+
+app.post('/api/classes/join-by-code', allowRoles('student'), (req, res) => {
+  const code = String(req.body.code || '').trim().toUpperCase()
+  const data = readData()
+  const classItem = data.classes.find((item) => item.code === code)
+  if (!classItem) return res.status(404).json({ error: 'Mã lớp không tồn tại.' })
+  req.params.classId = classItem.id
+  const existing = (data.classJoinRequests || []).find((item) => item.classId === classItem.id && item.userId === req.user.sub && item.status === 'pending')
+  if (existing) return res.status(409).json({ error: 'Bạn đã gửi yêu cầu vào lớp này.' })
+  if (data.students.some((item) => item.classId === classItem.id && item.userId === req.user.sub)) return res.status(409).json({ error: 'Bạn đã ở trong lớp này.' })
+  const account = data.users.find((item) => item.id === req.user.sub)
+  data.classJoinRequests ||= []
+  const request = { id: `join-${randomUUID()}`, classId: classItem.id, userId: req.user.sub, studentCode: account?.studentCode || '', studentName: account?.name || req.user.name, status: 'pending', createdAt: new Date().toISOString() }
+  data.classJoinRequests.push(request)
+  data.notifications ||= []
+  data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: 'teacher', classId: classItem.id, type: 'join-request', title: 'Yêu cầu vào lớp mới', message: `${request.studentName} muốn tham gia lớp ${classItem.code}.`, isRead: false, createdAt: new Date().toISOString() })
+  writeData(data)
+  res.status(201).json({ data: { request, class: classItem } })
+})
+
+app.patch('/api/classes/:classId/join-requests/:requestId', allowRoles('admin', 'teacher'), (req, res) => {
+  const result = requireClassManager(req, res)
+  if (!result) return
+  const request = (result.data.classJoinRequests || []).find((item) => item.id === req.params.requestId && item.classId === result.classItem.id)
+  if (!request) return res.status(404).json({ error: 'Không tìm thấy yêu cầu.' })
+  if (!['approved', 'rejected'].includes(req.body.status)) return res.status(400).json({ error: 'Trạng thái phê duyệt không hợp lệ.' })
+  request.status = req.body.status
+  request.reviewedAt = new Date().toISOString()
+  if (request.status === 'approved') {
+    const account = result.data.users.find((item) => item.id === request.userId)
+    if (!result.data.students.some((item) => item.userId === request.userId || (request.studentCode && item.id === request.studentCode))) result.data.students.push({ id: request.studentCode || `HS${String(result.data.students.length + 1).padStart(5, '0')}`, userId: request.userId, name: account?.name || request.studentName, email: account?.email || '', phone: account?.phone || '', classId: result.classItem.id, status: 'absent', score: null })
+  }
+  result.data.notifications ||= []
+  result.  data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: 'individual', userIds: [request.userId], studentIds: [request.studentCode], type: 'join-request', title: request.status === 'approved' ? 'Đã được duyệt vào lớp' : 'Yêu cầu vào lớp bị từ chối', message: `Yêu cầu vào lớp ${result.classItem.code} đã được ${request.status === 'approved' ? 'chấp thuận' : 'từ chối'}.`, isRead: false, createdAt: new Date().toISOString() })
+  writeData(result.data)
+  res.json({ data: request })
 })
 
 app.get('/api/classes/:classId/students', (req, res) => {
@@ -868,7 +942,7 @@ app.get('/api/notifications', (req, res) => {
       const classItem = notification.classId && findClass(data, notification.classId)
       return !classItem || classItem.teacherId === req.user.sub
     }
-    if (notification.recipientType === 'individual') return notification.studentIds?.includes(student?.id)
+    if (notification.recipientType === 'individual') return notification.userIds?.includes(req.user.sub) || notification.studentIds?.includes(student?.id)
     return notification.classId === student?.classId
   })
   res.json({ data: notifications.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) })
