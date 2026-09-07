@@ -55,12 +55,12 @@ function readData() {
     else if (dataDirectory !== __dirname && existsSync(seedDataPath)) copyFileSync(seedDataPath, dataPath)
     else writeFileSync(dataPath, `${JSON.stringify(emptyData(), null, 2)}\n`)
   }
-  try {
-    return normalizeData(JSON.parse(readFileSync(dataPath, 'utf8')))
-  } catch (error) {
-    if (existsSync(backupDataPath)) return normalizeData(JSON.parse(readFileSync(backupDataPath, 'utf8')))
-    throw error
+  const candidates = [dataPath, backupDataPath, seedDataPath]
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue
+    try { return normalizeData(JSON.parse(readFileSync(candidate, 'utf8'))) } catch { /* try the next recovery copy */ }
   }
+  return emptyData()
 }
 
 function writeData(data) {
