@@ -198,13 +198,18 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.post('/api/auth/login', async (req, res) => {
-  const { identifier, email, password, role } = req.body
-  const data = readData()
-  const loginIdentifier = String(identifier || email || '').trim().toLowerCase()
-  const user = (data.users || []).find((item) => item.email?.toLowerCase() === loginIdentifier || item.username?.toLowerCase() === loginIdentifier)
-  if (!user || !(await bcrypt.compare(password || '', user.passwordHash))) return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' })
-  if (role && user.role !== role) return res.status(403).json({ error: `Tài khoản này là ${user.role === 'teacher' ? 'giáo viên' : user.role === 'student' ? 'học sinh' : 'quản trị viên'}, không phải loại tài khoản đã chọn.` })
-  res.json({ data: { token: issueToken(user), user: publicUser(user) } })
+  try {
+    const { identifier, email, password, role } = req.body || {}
+    const data = readData()
+    const loginIdentifier = String(identifier || email || '').trim().toLowerCase()
+    const user = (data.users || []).find((item) => item.email?.toLowerCase() === loginIdentifier || item.username?.toLowerCase() === loginIdentifier)
+    if (!user?.passwordHash || !(await bcrypt.compare(String(password || ''), user.passwordHash))) return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' })
+    if (role && user.role !== role) return res.status(403).json({ error: `Tài khoản này là ${user.role === 'teacher' ? 'giáo viên' : user.role === 'student' ? 'học sinh' : 'quản trị viên'}, không phải loại tài khoản đã chọn.` })
+    res.json({ data: { token: issueToken(user), user: publicUser(user) } })
+  } catch (error) {
+    console.error('Login error:', error)
+    res.status(500).json({ error: 'Không thể đăng nhập lúc này. Vui lòng thử lại.' })
+  }
 })
 
 app.post('/api/auth/register', async (req, res) => {

@@ -396,15 +396,19 @@ function StudentPortal({ user, onLogout }) {
   useEffect(() => {
     async function load() {
       try {
-        const [nextClasses, nextExams, nextTimetable] = await Promise.all([api.getClasses(), api.getExams(), api.getTimetable()])
-        const nextAssignments = (await Promise.all(nextClasses.map((classItem) => api.getAssignments(classItem.id)))).flat()
-        const attendanceItems = (await Promise.all(nextClasses.map((classItem) => api.getAttendance(classItem.id)))).flatMap((item) => item.sessions)
+        const [nextClasses, nextExams, nextTimetable] = await Promise.all([
+          api.getClasses(),
+          api.getExams().catch(() => []),
+          api.getTimetable().catch(() => []),
+        ])
+        const nextAssignments = (await Promise.all(nextClasses.map((classItem) => api.getAssignments(classItem.id).catch(() => [])))).flat()
+        const attendanceItems = (await Promise.all(nextClasses.map((classItem) => api.getAttendance(classItem.id).catch(() => ({ sessions: [] }))))).flatMap((item) => item.sessions)
         setClasses(nextClasses)
         setExams(nextExams)
         setTimetableItems(nextTimetable)
         setAssignments(nextAssignments)
         setAttendanceSessions(attendanceItems.filter((session) => session.status === 'active' && new Date(session.expiresAt).getTime() > Date.now()))
-        setNotifications(await api.getNotifications())
+        setNotifications(await api.getNotifications().catch(() => []))
       } catch (requestError) {
         setError(requestError.message)
       } finally {
