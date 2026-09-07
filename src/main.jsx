@@ -2,7 +2,8 @@ import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   Bell, BookOpen, CalendarDays, Check, ChevronDown, ClipboardCheck,
-  Clock3, GraduationCap, LayoutDashboard, LogOut, Menu, Plus, QrCode, Search, Settings,
+  Clock3, GraduationCap, LayoutDashboard, LogOut, Menu, Pencil, Plus, QrCode, Search, Settings,
+  Trash2,
   Users, X, Zap,
 } from 'lucide-react'
 import QRCode from 'qrcode'
@@ -91,6 +92,7 @@ function App() {
           <NavItem icon={<BookOpen size={18} />} label="Đề thi" onClick={() => { setActiveTab('exams'); setMobileMenuOpen(false) }} active={activeTab === 'exams'} />
           <NavItem icon={<ClipboardCheck size={18} />} label="Bài tập" onClick={() => { setActiveTab('assignments'); setMobileMenuOpen(false) }} active={activeTab === 'assignments'} />
           <NavItem icon={<CalendarDays size={18} />} label="Điểm danh" onClick={() => { setActiveTab('attendance'); setMobileMenuOpen(false) }} active={activeTab === 'attendance'} />
+          <NavItem icon={<Clock3 size={18} />} label="Thời khóa biểu" onClick={() => { setActiveTab('timetable'); setMobileMenuOpen(false) }} active={activeTab === 'timetable'} />
           <NavItem icon={<GraduationCap size={18} />} label="Học sinh" onClick={() => { setActiveTab('students'); setMobileMenuOpen(false) }} active={activeTab === 'students'} />
           <NavItem icon={<Zap size={18} />} label="Kết quả" onClick={() => setActiveTab('exams')} active={false} />
           {user.role === 'admin' && <NavItem icon={<Settings size={18} />} label="Quản trị user" onClick={() => setActiveTab('admin')} active={activeTab === 'admin'} />}
@@ -128,6 +130,7 @@ function App() {
           {activeTab === 'overview' && <Overview classId={selectedClass.id} selectedClass={selectedClass} onAttendance={() => setActiveTab('attendance')} />}
           {activeTab === 'students' && <Students classId={selectedClass.id} />}
           {activeTab === 'attendance' && <Attendance classId={selectedClass.id} />}
+          {activeTab === 'timetable' && <Timetable classes={classes} />}
           {activeTab === 'assignments' && <Assignments classId={selectedClass.id} />}
           {activeTab === 'exams' && <ExamRunner />}
           {activeTab === 'admin' && user.role === 'admin' && <AdminUsers />}
@@ -198,16 +201,72 @@ function Students({ classId }) {
   }
   return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">DANH SÁCH LỚP</span><h3>{classStudents.length} học sinh</h3></div><button className="secondary-button" onClick={() => setShowForm(!showForm)}><Plus size={16} /> Thêm học sinh</button></div>{error && <p className="interaction-hint">{error}</p>}{showForm && <form className="inline-form" onSubmit={addStudent}><input name="name" placeholder="Họ và tên học sinh" required /><input name="id" placeholder="Mã học sinh" required /><button className="primary-button" type="submit">Thêm</button></form>}<div className="student-table">{classStudents.map((student) => <div className="table-row" key={student.id}><div className="student-cell"><div className="avatar avatar-table">{student.initials}</div><div><strong>{student.name}</strong><small>{student.id}</small></div></div><span className={`status ${student.status}`}><span /> {statusLabels[student.status]}</span><strong>{student.score}</strong><button className="row-arrow">→</button></div>)}</div></section>
 }
+
+function localDateTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  const offset = date.getTimezoneOffset()
+  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16)
+}
+
+function Timetable({ classes }) {
+  const emptyForm = { classId: classes[0]?.id || '', title: '', subject: '', room: '', startsAt: '', endsAt: '', notes: '' }
+  const [items, setItems] = useState([])
+  const [form, setForm] = useState(emptyForm)
+  const [editingId, setEditingId] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  async function load() { try { setItems(await api.getTimetable()) } catch (requestError) { setError(requestError.message) } }
+  useEffect(() => { load() }, [])
+  useEffect(() => { if (!form.classId && classes[0]) setForm((current) => ({ ...current, classId: classes[0].id })) }, [classes, form.classId])
+  function startEdit(item) {
+    setEditingId(item.id)
+    setForm({ classId: item.classId, title: item.title, subject: item.subject || '', room: item.room || '', startsAt: localDateTime(item.startsAt), endsAt: localDateTime(item.endsAt), notes: item.notes || '' })
+    setShowForm(true)
+  }
+  async function save(event) {
+    event.preventDefault(); setError('')
+    try {
+      const payload = { ...form, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString() }
+      if (editingId) await api.updateTimetableSession(editingId, payload)
+      else await api.createTimetableSession(payload)
+      setForm({ ...emptyForm, classId: classes[0]?.id || '' }); setEditingId(''); setShowForm(false); await load()
+    } catch (requestError) { setError(requestError.message) }
+  }
+  async function remove(item) {
+    if (!window.confirm(`Xóa buổi học ${item.title}?`)) return
+    try { await api.deleteTimetableSession(item.id); setItems((current) => current.filter((entry) => entry.id !== item.id)) } catch (requestError) { setError(requestError.message) }
+  }
+  async function openAttendance(item) {
+    try { const session = await api.createTimetableAttendance(item.id, { expiresInMinutes: 90 }); setNotice(`Đã mở điểm danh ${item.classCode} · mã ${session.code}`); await load() } catch (requestError) { setError(requestError.message) }
+  }
+  return <section className="panel full-panel timetable-panel">
+    <div className="panel-head"><div><span className="section-kicker">LỊCH DẠY TOÀN TRƯỜNG</span><h3>{items.length} buổi học</h3></div><button className="primary-button" onClick={() => { setEditingId(''); setForm({ ...emptyForm, classId: classes[0]?.id || '' }); setShowForm(!showForm) }}><Plus size={17} /> Thêm buổi học</button></div>
+    <p className="muted">Quản lý lịch học của tất cả lớp và mở điểm danh theo từng buổi.</p>
+    {error && <p className="interaction-hint">{error}</p>}{notice && <p className="success-alert">{notice}</p>}
+    {showForm && <form className="timetable-form" onSubmit={save}><label>Lớp học<select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value })} disabled={Boolean(editingId)} required>{classes.map((item) => <option value={item.id} key={item.id}>{item.code} · {item.name}</option>)}</select></label><label>Tên buổi học<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Ví dụ: Kinh tế vi mô - Tuần 3" required /></label><div className="form-row"><label>Bắt đầu<input type="datetime-local" value={form.startsAt} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} required /></label><label>Kết thúc<input type="datetime-local" value={form.endsAt} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} required /></label></div><div className="form-row"><label>Môn học<input value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} /></label><label>Phòng học<input value={form.room} onChange={(event) => setForm({ ...form, room: event.target.value })} /></label></div><label>Ghi chú<input value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => { setShowForm(false); setEditingId('') }}>Hủy</button><button className="primary-button">{editingId ? 'Lưu thay đổi' : 'Tạo buổi học'}</button></div></form>}
+    <div className="timetable-list">{items.map((item) => <article className="timetable-row" key={item.id}><div className="timetable-date"><strong>{new Date(item.startsAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}</strong><small>{new Date(item.startsAt).toLocaleDateString('vi-VN', { weekday: 'short' })}</small></div><div className="timetable-copy"><strong>{item.title}</strong><small>{item.classCode} · {new Date(item.startsAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} - {new Date(item.endsAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · {item.room || 'Chưa có phòng'}</small></div><div className="timetable-actions">{item.attendanceSession?.status === 'active' ? <span className="live-badge"><span /> Mã {item.attendanceSession.code}</span> : <button className="secondary-button" onClick={() => openAttendance(item)}><QrCode size={15} /> Mở điểm danh</button>}<button className="icon-button" title="Sửa" onClick={() => startEdit(item)}><Pencil size={16} /></button><button className="icon-button" title="Xóa" onClick={() => remove(item)}><Trash2 size={16} /></button></div></article>)}</div>
+    {!items.length && <p className="interaction-hint">Chưa có buổi học nào trong thời khóa biểu.</p>}
+  </section>
+}
+
 function Attendance({ classId }) {
   const [records, setRecords] = useState([])
   const [session, setSession] = useState(null)
+  const [timetableItems, setTimetableItems] = useState([])
+  const [selectedTimetableId, setSelectedTimetableId] = useState('')
   const [qrData, setQrData] = useState('')
   const [error, setError] = useState('')
   const order = ['present', 'late', 'absent', 'excused']
   async function loadAttendance() {
     try {
-      const [classStudents, attendance] = await Promise.all([api.getStudents(classId), api.getAttendance(classId)])
-      const latest = attendance.sessions.at(-1)
+      const [classStudents, attendance, timetable] = await Promise.all([api.getStudents(classId), api.getAttendance(classId), api.getTimetable()])
+      const classTimetable = timetable.filter((item) => item.classId === classId)
+      setTimetableItems(classTimetable)
+      const timetableId = selectedTimetableId && classTimetable.some((item) => item.id === selectedTimetableId) ? selectedTimetableId : classTimetable.at(-1)?.id || ''
+      if (selectedTimetableId !== timetableId) setSelectedTimetableId(timetableId)
+      const latest = timetableId ? attendance.sessions.filter((item) => item.timetableSessionId === timetableId).at(-1) : attendance.sessions.at(-1)
       setSession(latest || null)
       const sessionRecords = latest ? attendance.records.filter((record) => record.sessionId === latest.id) : []
       setRecords(classStudents.map((student) => {
@@ -218,10 +277,12 @@ function Attendance({ classId }) {
       setError(requestError.message)
     }
   }
-  useEffect(() => { loadAttendance() }, [classId])
+  useEffect(() => { loadAttendance()   }, [classId, selectedTimetableId])
   async function createSession() {
     try {
-      const createdSession = await api.createAttendanceSession(classId, { expiresInMinutes: 2 })
+      const createdSession = selectedTimetableId
+        ? await api.createTimetableAttendance(selectedTimetableId, { expiresInMinutes: 90 })
+        : await api.createAttendanceSession(classId, { expiresInMinutes: 2 })
       const payload = JSON.stringify({ type: 'attendance', sessionId: createdSession.id, code: createdSession.code, expiresAt: createdSession.expiresAt })
       setQrData(await QRCode.toDataURL(payload, { width: 220, margin: 2, errorCorrectionLevel: 'M' }))
       await loadAttendance()
@@ -243,15 +304,26 @@ function Attendance({ classId }) {
     link.click()
     URL.revokeObjectURL(url)
   }
-  return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">ĐIỂM DANH</span><h3>Buổi 05 <span>· Chủ nhật, 06/09/2026</span></h3></div><button className="primary-button" onClick={createSession}><QrCode size={17} /> Tạo mã điểm danh</button></div>{error && <p className="interaction-hint">{error}</p>}{qrData && session && <div className="qr-panel"><img src={qrData} alt={`QR điểm danh ${session.code}`} /><div><span className="section-kicker">ĐIỂM DANH BẰNG QR</span><strong>Mã {session.code}</strong><small>Hết hạn lúc {new Date(session.expiresAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</small><button className="secondary-button" onClick={() => setQrData('')}>Ẩn QR</button></div></div>}<div className="attendance-toolbar"><span><Clock3 size={16} /> {session ? <>Mã phiên <strong>{session.code}</strong></> : 'Chưa có phiên điểm danh'}</span><button className="secondary-button" onClick={exportAttendance} disabled={!records.length}>Xuất lịch sử</button></div><p className="interaction-hint">{session ? 'Bấm vào trạng thái để cập nhật và lưu điểm danh.' : 'Tạo mã điểm danh để mở phiên cho học sinh.'}</p><div className="student-table">{records.map((student, index) => <div className="table-row" key={student.id}><div className="student-cell"><div className="avatar avatar-table">{student.initials}</div><div><strong>{student.name}</strong><small>{student.id}</small></div></div><button className={`status-select ${student.status}`} onClick={() => cycleStatus(student)}>{statusLabels[student.status]} <ChevronDown size={14} /></button><span className="attendance-time">18:0{index + 1}</span><button className="row-arrow">→</button></div>)}</div></section>
+  return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">ĐIỂM DANH THEO BUỔI</span><h3>{timetableItems.find((item) => item.id === selectedTimetableId)?.title || 'Buổi học hiện tại'}</h3></div><button className="primary-button" onClick={createSession}><QrCode size={17} /> Mở điểm danh</button></div>{timetableItems.length > 0 && <label className="attendance-session-picker">Buổi học<select value={selectedTimetableId} onChange={(event) => setSelectedTimetableId(event.target.value)}>{timetableItems.map((item) => <option key={item.id} value={item.id}>{new Date(item.startsAt).toLocaleDateString('vi-VN')} · {item.title}</option>)}</select></label>}{error && <p className="interaction-hint">{error}</p>}{qrData && session && <div className="qr-panel"><img src={qrData} alt={`QR điểm danh ${session.code}`} /><div><span className="section-kicker">ĐIỂM DANH BẰNG QR</span><strong>Mã {session.code}</strong><small>Hết hạn lúc {new Date(session.expiresAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</small><button className="secondary-button" onClick={() => setQrData('')}>Ẩn QR</button></div></div>}<div className="attendance-toolbar"><span><Clock3 size={16} /> {session ? <>Mã phiên <strong>{session.code}</strong></> : 'Chưa có phiên điểm danh'}</span><button className="secondary-button" onClick={exportAttendance} disabled={!records.length}>Xuất lịch sử</button></div><p className="interaction-hint">{session ? 'Bấm vào trạng thái để cập nhật và lưu điểm danh.' : 'Chọn một buổi học rồi mở điểm danh cho học sinh.'}</p><div className="student-table">{records.map((student, index) => <div className="table-row" key={student.id}><div className="student-cell"><div className="avatar avatar-table">{student.initials}</div><div><strong>{student.name}</strong><small>{student.id}</small></div></div><button className={`status-select ${student.status}`} onClick={() => cycleStatus(student)}>{statusLabels[student.status]} <ChevronDown size={14} /></button><span className="attendance-time">18:0{index + 1}</span><button className="row-arrow">→</button></div>)}</div></section>
 }
 function Assignments({ classId }) {
   const [items, setItems] = useState([])
+  const [classStudents, setClassStudents] = useState([])
   const [showForm, setShowForm] = useState(false)
+  const [targetMode, setTargetMode] = useState('class')
   const [error, setError] = useState('')
-  useEffect(() => { api.getAssignments(classId).then((data) => setItems(data.map((item) => ({ ...item, type: item.type === 'exam' ? 'Bài kiểm tra' : 'Tài liệu PDF', due: `Hạn nộp ${new Date(item.dueAt).toLocaleDateString('vi-VN')}`, progress: item.submitted ? `${item.submitted}/${item.total} đã nộp` : 'Chưa nộp', tone: item.type === 'exam' ? 'orange' : 'blue' })))).catch((requestError) => setError(requestError.message)) }, [classId])
-  async function addAssignment(event) { event.preventDefault(); const form = new FormData(event.currentTarget); try { const item = await api.createAssignment(classId, { title: form.get('title'), type: 'exam', dueAt: new Date(`${form.get('due')}T23:59:00`).toISOString() }); setItems((current) => [...current, { ...item, type: 'Bài kiểm tra', due: `Hạn nộp ${new Date(item.dueAt).toLocaleDateString('vi-VN')}`, progress: 'Chưa nộp', tone: 'orange' }]); event.currentTarget.reset(); setShowForm(false) } catch (requestError) { setError(requestError.message) } }
-  return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">BÀI TẬP VÀ KIỂM TRA</span><h3>{items.length} hoạt động</h3></div><button className="primary-button" onClick={() => setShowForm(!showForm)}><Plus size={17} /> Giao bài tập</button></div>{error && <p className="interaction-hint">{error}</p>}{showForm && <form className="inline-form" onSubmit={addAssignment}><input name="title" placeholder="Tên bài tập" required /><input name="due" type="date" required /><button className="primary-button" type="submit">Giao bài</button></form>}<div className="assignment-list">{items.map((item) => <Assignment key={item.id} {...item} />)}</div></section>
+  useEffect(() => { Promise.all([api.getAssignments(classId), api.getStudents(classId)]).then(([data, nextStudents]) => { setItems(data.map((item) => ({ ...item, type: item.type === 'exam' ? 'Bài kiểm tra' : 'Bài tập', due: `Hạn nộp ${new Date(item.dueAt).toLocaleDateString('vi-VN')}`, progress: item.submitted ? `${item.submitted}/${item.total} đã nộp` : `${item.total} người nhận`, tone: item.type === 'exam' ? 'orange' : 'blue' }))); setClassStudents(nextStudents) }).catch((requestError) => setError(requestError.message)) }, [classId])
+  async function addAssignment(event) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const studentIds = targetMode === 'individual' ? form.getAll('studentIds') : []
+    try {
+      const item = await api.createAssignment(classId, { title: form.get('title'), type: form.get('type'), dueAt: new Date(`${form.get('due')}T23:59:00`).toISOString(), studentIds })
+      setItems((current) => [...current, { ...item, type: item.type === 'exam' ? 'Bài kiểm tra' : 'Bài tập', due: `Hạn nộp ${new Date(item.dueAt).toLocaleDateString('vi-VN')}`, progress: `${item.total} người nhận`, tone: item.type === 'exam' ? 'orange' : 'blue' }])
+      event.currentTarget.reset(); setTargetMode('class'); setShowForm(false)
+    } catch (requestError) { setError(requestError.message) }
+  }
+  return <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">BÀI TẬP VÀ KIỂM TRA</span><h3>{items.length} hoạt động</h3></div><button className="primary-button" onClick={() => setShowForm(!showForm)}><Plus size={17} /> Giao bài tập / kiểm tra</button></div>{error && <p className="interaction-hint">{error}</p>}{showForm && <form className="assignment-form" onSubmit={addAssignment}><div className="form-row"><label>Tên hoạt động<input name="title" placeholder="Tên bài tập hoặc bài kiểm tra" required /></label><label>Loại<select name="type" defaultValue="homework"><option value="homework">Bài tập</option><option value="exam">Bài kiểm tra</option></select></label></div><label>Hạn nộp<input name="due" type="date" required /></label><label>Đối tượng<select value={targetMode} onChange={(event) => setTargetMode(event.target.value)}><option value="class">Cả lớp</option><option value="individual">Chọn học sinh</option></select></label>{targetMode === 'individual' && <select name="studentIds" multiple required size={Math.min(5, Math.max(2, classStudents.length))}>{classStudents.map((student) => <option key={student.id} value={student.id}>{student.name} · {student.id}</option>)}</select>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Hủy</button><button className="primary-button" type="submit">Giao hoạt động</button></div></form>}<div className="assignment-list">{items.map((item) => <Assignment key={item.id} {...item} />)}</div></section>
 }
 function AIGenerator() {
   const [exam, setExam] = useState(null)
@@ -273,6 +345,7 @@ function StudentPortal({ user, onLogout }) {
   const [classes, setClasses] = useState([])
   const [assignments, setAssignments] = useState([])
   const [exams, setExams] = useState([])
+  const [timetableItems, setTimetableItems] = useState([])
   const [attendanceSessions, setAttendanceSessions] = useState([])
   const [attendanceCode, setAttendanceCode] = useState('')
   const [attendanceMessage, setAttendanceMessage] = useState('')
@@ -283,11 +356,12 @@ function StudentPortal({ user, onLogout }) {
   useEffect(() => {
     async function load() {
       try {
-        const [nextClasses, nextExams] = await Promise.all([api.getClasses(), api.getExams()])
+        const [nextClasses, nextExams, nextTimetable] = await Promise.all([api.getClasses(), api.getExams(), api.getTimetable()])
         const nextAssignments = (await Promise.all(nextClasses.map((classItem) => api.getAssignments(classItem.id)))).flat()
         const attendanceItems = (await Promise.all(nextClasses.map((classItem) => api.getAttendance(classItem.id)))).flatMap((item) => item.sessions)
         setClasses(nextClasses)
         setExams(nextExams)
+        setTimetableItems(nextTimetable)
         setAssignments(nextAssignments)
         setAttendanceSessions(attendanceItems.filter((session) => session.status === 'active' && new Date(session.expiresAt).getTime() > Date.now()))
       } catch (requestError) {
@@ -320,6 +394,7 @@ function StudentPortal({ user, onLogout }) {
       <section className="panel"><div className="panel-head"><div><span className="section-kicker">LỚP HỌC CỦA TÔI</span><h3>{classes.length} lớp</h3></div><Users size={20} /></div>{classes.length ? classes.map((classItem) => <div className="assignment-row" key={classItem.id}><div className="assignment-icon blue"><BookOpen size={19} /></div><div><strong>{classItem.code}</strong><small>{classItem.name} · {classItem.schedule || 'Chưa có lịch học'}</small></div><span className="assignment-progress blue">{classItem.studentCount} HS</span></div>) : <p className="interaction-hint">Bạn chưa được thêm vào lớp nào.</p>}</section>
       <section className="panel"><div className="panel-head"><div><span className="section-kicker">BÀI KIỂM TRA</span><h3>{exams.length} bài có thể làm</h3></div><ClipboardCheck size={20} /></div>{exams.length ? exams.map((exam) => <button className="exam-list-item exam-list-button" key={exam.id} onClick={() => setView('exam')}><div className="assignment-icon orange"><ClipboardCheck size={18} /></div><span><strong>{exam.title}</strong><small>{exam.questionCount} câu · {exam.durationMinutes} phút</small></span><span className="row-arrow">→</span></button>) : <p className="interaction-hint">Chưa có bài kiểm tra được giao.</p>}</section>
       <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">ĐIỂM DANH THEO BUỔI</span><h3>{attendanceSessions.length ? 'Có buổi đang mở' : 'Chưa có buổi đang mở'}</h3></div><CalendarDays size={20} /></div><p className="muted">Nhập mã 6 chữ số do giáo viên cung cấp để xác nhận có mặt.</p><div className="inline-form"><input value={attendanceCode} onChange={(event) => setAttendanceCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="Mã điểm danh" aria-label="Mã điểm danh" /><button className="primary-button" onClick={checkIn} disabled={attendanceCode.length !== 6}>Xác nhận có mặt</button></div>{attendanceSessions.map((session) => <div className="assignment-row" key={session.id}><div className="assignment-icon blue"><Clock3 size={19} /></div><div><strong>Buổi học đang mở</strong><small>Hết hạn lúc {new Date(session.expiresAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</small></div><span className="assignment-progress blue">Mã 6 số</span></div>)}{attendanceMessage && <p className={attendanceMessage.startsWith('Đã ') ? 'success-alert' : 'api-alert'}>{attendanceMessage}</p>}</section>
+      <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">THỜI KHÓA BIỂU</span><h3>{timetableItems.length} buổi học</h3></div><Clock3 size={20} /></div>{timetableItems.length ? <div className="timetable-list">{timetableItems.map((item) => <div className="timetable-row" key={item.id}><div className="timetable-date"><strong>{new Date(item.startsAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}</strong><small>{new Date(item.startsAt).toLocaleDateString('vi-VN', { weekday: 'short' })}</small></div><div className="timetable-copy"><strong>{item.title}</strong><small>{item.classCode} · {new Date(item.startsAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} - {new Date(item.endsAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · {item.room || 'Chưa có phòng'}</small></div>{item.attendanceSession?.status === 'active' && <span className="live-badge"><span /> Đang mở</span>}</div>)}</div> : <p className="interaction-hint">Chưa có lịch học được công bố.</p>}</section>
       <section className="panel full-panel"><div className="panel-head"><div><span className="section-kicker">BÀI TẬP SẮP TỚI</span><h3>{assignments.length} hoạt động</h3></div><CalendarDays size={20} /></div>{assignments.length ? <div className="assignment-list">{assignments.map((assignment) => <button className="assignment-row assignment-button" key={assignment.id} onClick={() => assignment.examId && setView('exam')}><div className={`assignment-icon ${assignment.type === 'exam' ? 'orange' : 'blue'}`}><BookOpen size={19} /></div><div><strong>{assignment.title}</strong><small>{assignment.type === 'exam' ? 'Bài kiểm tra online' : 'Tài liệu'} · Hạn nộp {new Date(assignment.dueAt).toLocaleDateString('vi-VN')}</small></div><span className="assignment-progress blue">{assignment.examId ? 'Làm bài →' : 'Đã giao'}</span></button>)}</div> : <p className="interaction-hint">Chưa có bài tập nào.</p>}</section>
     </div>}
   </section></main>
@@ -422,12 +497,16 @@ function parseManualExam(text) {
 function AIGeneratorV2({ classId }) {
   const [mode, setMode] = useState('file')
   const [exam, setExam] = useState(null)
+  const [classStudents, setClassStudents] = useState([])
+  const [targetMode, setTargetMode] = useState('class')
+  const [selectedStudentIds, setSelectedStudentIds] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [savedId, setSavedId] = useState('')
   const [published, setPublished] = useState(false)
+  useEffect(() => { api.getStudents(classId).then(setClassStudents).catch(() => setClassStudents([])) }, [classId])
   async function generate(event) {
-    event.preventDefault(); setBusy(true); setError(''); setExam(null); setSavedId(''); setPublished(false)
+    event.preventDefault(); setBusy(true); setError(''); setExam(null); setSavedId(''); setPublished(false); setTargetMode('class'); setSelectedStudentIds([])
     const form = new FormData(event.currentTarget)
     try {
       const result = mode === 'file' ? await api.generateExamFromFile(form) : parseManualExam(form.get('topic'))
@@ -437,8 +516,8 @@ function AIGeneratorV2({ classId }) {
   async function saveExam() {
     try { const saved = await api.saveExam({ title: exam.title, subject: exam.subject, questions: exam.questions, classId }); setSavedId(saved.id) } catch (requestError) { setError(requestError.message) }
   }
-  async function publishExam() { try { await api.publishExam(classId, savedId, {}); setPublished(true) } catch (requestError) { setError(requestError.message) } }
-  return <section className="ai-layout"><section className="panel ai-form-panel"><div className="panel-head"><div><span className="section-kicker">EXAMAI CONVERTER</span><h3>Chuyển đề thành bài online</h3></div><span className="ai-badge"><Zap size={13} /> Chuẩn hóa</span></div><div className="mode-switch"><button className={mode === 'file' ? 'active' : ''} onClick={() => setMode('file')}>Tải Word/PDF</button><button className={mode === 'manual' ? 'active' : ''} onClick={() => setMode('manual')}>Nhập thủ công</button></div><p className="muted ai-description">File của giáo viên đã có sẵn câu hỏi. Hệ thống chỉ đọc, giữ nguyên và chuyển thành bài kiểm tra online.</p><form className="ai-form" onSubmit={generate}>{mode === 'file' ? <label>File đề trắc nghiệm<input name="file" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></label> : <label>Nội dung đề trắc nghiệm<textarea name="topic" rows="8" placeholder="Ví dụ: Câu 1. ...\nA. ...\nB. ...\nĐáp án: B" required /></label>}<label>Ghi chú cho hệ thống<textarea name="instructions" rows="3" placeholder="Ví dụ: đáp án nằm ở cuối tài liệu, giữ nguyên số câu..." /></label>{error && <p className="api-alert">{error}</p>}<button className="primary-button ai-submit" disabled={busy}>{busy ? 'Đang chuyển đổi...' : <><Zap size={17} /> Chuyển thành bài online</>}</button></form></section><section className="panel exam-preview">{exam ? <><div className="panel-head"><div><span className="section-kicker">BẢN NHÁP CẦN KIỂM DUYỆT</span><h3>{exam.title}</h3></div><div className="preview-actions"><span className="question-count">{exam.questions.length} câu</span><button className="primary-button" onClick={saveExam} disabled={Boolean(savedId)}>{savedId ? 'Đã lưu đề' : 'Lưu đề thi'}</button>{savedId && <button className="secondary-button" onClick={publishExam} disabled={published}>{published ? 'Đã giao vào lớp' : 'Giao vào lớp'}</button>}</div></div><div className="question-list">{exam.questions.map((question, index) => <article className="question-card" key={`${question.question}-${index}`}><strong>Câu {index + 1}. {question.question}</strong><ol type="A">{question.options.map((option) => <li key={option}>{option}</li>)}</ol><small>{question.correctAnswer === null || question.correctAnswer === undefined ? 'Chưa nhận diện đáp án, cần giáo viên kiểm tra.' : `Đáp án: ${String.fromCharCode(65 + question.correctAnswer)}`} {question.explanation && `· ${question.explanation}`}</small></article>)}</div></> : <div className="empty-preview"><Zap size={26} /><strong>Bản xem trước bài online</strong><p>Tải file hoặc nhập đề có sẵn để chuyển đổi, không tạo thêm câu hỏi.</p></div>}</section></section>
+  async function publishExam() { try { await api.publishExam(classId, savedId, { studentIds: targetMode === 'individual' ? selectedStudentIds : [] }); setPublished(true) } catch (requestError) { setError(requestError.message) } }
+  return <section className="ai-layout"><section className="panel ai-form-panel"><div className="panel-head"><div><span className="section-kicker">EXAMAI CONVERTER</span><h3>Chuyển đề thành bài online</h3></div><span className="ai-badge"><Zap size={13} /> Chuẩn hóa</span></div><div className="mode-switch"><button className={mode === 'file' ? 'active' : ''} onClick={() => setMode('file')}>Tải Word/PDF</button><button className={mode === 'manual' ? 'active' : ''} onClick={() => setMode('manual')}>Nhập thủ công</button></div><p className="muted ai-description">File của giáo viên đã có sẵn câu hỏi. Hệ thống chỉ đọc, giữ nguyên và chuyển thành bài kiểm tra online.</p><form className="ai-form" onSubmit={generate}>{mode === 'file' ? <label>File đề trắc nghiệm<input name="file" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></label> : <label>Nội dung đề trắc nghiệm<textarea name="topic" rows="8" placeholder="Ví dụ: Câu 1. ...\nA. ...\nB. ...\nĐáp án: B" required /></label>}<label>Ghi chú cho hệ thống<textarea name="instructions" rows="3" placeholder="Ví dụ: đáp án nằm ở cuối tài liệu, giữ nguyên số câu..." /></label>{error && <p className="api-alert">{error}</p>}<button className="primary-button ai-submit" disabled={busy}>{busy ? 'Đang chuyển đổi...' : <><Zap size={17} /> Chuyển thành bài online</>}</button></form></section><section className="panel exam-preview">{exam ? <><div className="panel-head"><div><span className="section-kicker">BẢN NHÁP CẦN KIỂM DUYỆT</span><h3>{exam.title}</h3></div><div className="preview-actions"><span className="question-count">{exam.questions.length} câu</span><button className="primary-button" onClick={saveExam} disabled={Boolean(savedId)}>{savedId ? 'Đã lưu đề' : 'Lưu đề thi'}</button>{savedId && <button className="secondary-button" onClick={publishExam} disabled={published}>{published ? 'Đã giao vào lớp' : 'Giao vào lớp'}</button>}</div></div>{savedId && <div className="exam-publish-target"><label>Đối tượng giao<select value={targetMode} onChange={(event) => setTargetMode(event.target.value)}><option value="class">Cả lớp</option><option value="individual">Chọn học sinh</option></select></label>{targetMode === 'individual' && <select multiple size={4} value={selectedStudentIds} onChange={(event) => setSelectedStudentIds([...event.target.selectedOptions].map((option) => option.value))}>{classStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.id}</option>)}</select>}</div>}<div className="question-list">{exam.questions.map((question, index) => <article className="question-card" key={`${question.question}-${index}`}><strong>Câu {index + 1}. {question.question}</strong><ol type="A">{question.options.map((option) => <li key={option}>{option}</li>)}</ol><small>{question.correctAnswer === null || question.correctAnswer === undefined ? 'Chưa nhận diện đáp án, cần giáo viên kiểm tra.' : `Đáp án: ${String.fromCharCode(65 + question.correctAnswer)}`} {question.explanation && `· ${question.explanation}`}</small></article>)}</div></> : <div className="empty-preview"><Zap size={26} /><strong>Bản xem trước bài online</strong><p>Tải file hoặc nhập đề có sẵn để chuyển đổi, không tạo thêm câu hỏi.</p></div>}</section></section>
 }
 
 createRoot(document.getElementById('root')).render(<StrictMode><App /></StrictMode>)

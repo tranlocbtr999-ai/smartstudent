@@ -97,6 +97,76 @@ function requireClassManager(req, res) {
   return result
 }
 
+function getStudentForUser(data, user) {
+  const account = data.users?.find((item) => item.id === user?.sub) || user
+  return data.students.find((student) => student.id === account?.studentCode || student.userId === user?.sub || student.email?.toLowerCase() === account?.email?.toLowerCase())
+}
+
+function canViewClass(data, classItem, user) {
+  if (!classItem || !user) return false
+  if (user.role === 'admin') return true
+  if (user.role === 'teacher') return classItem.teacherId === user.sub
+  return getStudentForUser(data, user)?.classId === classItem.id
+}
+
+function canViewAssignment(data, assignment, user) {
+  if (!assignment || !user) return false
+  const classItem = findClass(data, assignment.classId)
+  if (!canViewClass(data, classItem, user)) return false
+  if (user.role !== 'student') return true
+  const student = getStudentForUser(data, user)
+  const targetStudentIds = Array.isArray(assignment.targetStudentIds) ? assignment.targetStudentIds : []
+  return assignment.targetType !== 'individual' || targetStudentIds.includes(student?.id)
+}
+
+function findTimetableSession(data, timetableId) {
+  return (data.timetableSessions || []).find((item) => item.id === timetableId)
+}
+
+function requireTimetableManager(req, res) {
+  const data = readData()
+  const timetableSession = findTimetableSession(data, req.params.timetableId)
+  if (!timetableSession) {
+    res.status(404).json({ error: 'Không tìm thấy buổi học trong thời khóa biểu.' })
+    return null
+  }
+  const classItem = findClass(data, timetableSession.classId)
+  if (!classItem || (req.user.role !== 'admin' && classItem.teacherId !== req.user.sub)) {
+    res.status(403).json({ error: 'Bạn không quản lý buổi học này.' })
+    return null
+  }
+  return { data, timetableSession, classItem }
+}
+
+function createAttendanceSession(data, classItem, timetableSession, expiresInMinutes) {
+  const now = new Date()
+  data.attendanceSessions ||= []
+  data.attendanceSessions
+    .filter((item) => item.classId === classItem.id && item.status === 'active')
+    .forEach((item) => { item.status = 'closed' })
+  const session = {
+    id: `attendance-${randomUUID()}`,
+    classId: classItem.id,
+    timetableSessionId: timetableSession?.id || null,
+    code: String(Math.floor(100000 + Math.random() * 900000)),
+    startsAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + expiresInMinutes * 60000).toISOString(),
+    status: 'active',
+  }
+  data.attendanceSessions.push(session)
+  data.attendanceRecords ||= []
+  data.students
+    .filter((student) => student.classId === classItem.id)
+    .forEach((student) => data.attendanceRecords.push({
+      id: `record-${randomUUID()}`,
+      sessionId: session.id,
+      studentId: student.id,
+      status: 'absent',
+      checkedAt: null,
+    }))
+  return session
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'exam-ai-api', timestamp: new Date().toISOString() })
 })
@@ -298,6 +368,7 @@ app.post('/api/exams', allowRoles('admin', 'teacher'), (req, res) => {
   const { title, subject = '', questions, classId = null, durationMinutes = 30 } = req.body
   if (!title || !Array.isArray(questions) || !questions.length) return res.status(400).json({ error: 'Đề thi cần có tiêu đề và ít nhất một câu hỏi.' })
   const data = readData()
+  if (classId && !canViewClass(data, findClass(data, classId), req.user)) return res.status(403).json({ error: 'Bạn không quản lý lớp học này.' })
   data.exams ||= []
   const exam = { id: `exam-${randomUUID()}`, title: title.trim(), subject, questions, classId, durationMinutes: Number(durationMinutes), status: 'draft', createdAt: new Date().toISOString() }
   data.exams.push(exam)
@@ -312,24 +383,37 @@ app.post('/api/classes/:classId/exams/:examId/publish', allowRoles('admin', 'tea
   if (!exam) return res.status(404).json({ error: 'Không tìm thấy đề thi.' })
   exam.classId = result.classItem.id
   exam.status = 'published'
-  const { dueAt, durationMinutes = exam.durationMinutes || 30 } = req.body
-  const assignment = { id: `assignment-${randomUUID()}`, classId: result.classItem.id, examId: exam.id, title: exam.title, type: 'exam', dueAt: dueAt || new Date(Date.now() + 7 * 86400000).toISOString(), status: 'published', submitted: 0, total: result.data.students.filter((student) => student.classId === result.classItem.id).length, durationMinutes: Number(durationMinutes), createdAt: new Date().toISOString() }
+  const { dueAt, durationMinutes = exam.durationMinutes || 30, studentIds = [] } = req.body
+  if (!Array.isArray(studentIds)) return res.status(400).json({ error: 'studentIds phải là một mảng.' })
+  const classStudents = result.data.students.filter((student) => student.classId === result.classItem.id)
+  const requestedStudentIds = [...new Set(studentIds.map((id) => String(id).trim()))]
+  if (requestedStudentIds.some((id) => !classStudents.some((student) => student.id === id))) return res.status(400).json({ error: 'Có học sinh không thuộc lớp học này.' })
+  const targetStudentIds = requestedStudentIds.length ? requestedStudentIds : classStudents.map((student) => student.id)
+  const assignment = { id: `assignment-${randomUUID()}`, classId: result.classItem.id, examId: exam.id, title: exam.title, type: 'exam', dueAt: dueAt || new Date(Date.now() + 7 * 86400000).toISOString(), status: 'published', targetType: requestedStudentIds.length ? 'individual' : 'class', targetStudentIds, submitted: 0, total: targetStudentIds.length, durationMinutes: Number(durationMinutes), createdAt: new Date().toISOString(), createdBy: req.user.sub }
   result.data.assignments.push(assignment)
-  result.data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: 'class', classId: result.classItem.id, type: 'assignment', title: 'Đề thi mới', message: `${exam.title} đã được giao vào lớp ${result.classItem.code}.`, isRead: false, createdAt: new Date().toISOString() })
+  result.data.notifications ||= []
+  result.data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: assignment.targetType, classId: result.classItem.id, studentIds: targetStudentIds, type: 'assignment', title: 'Đề thi mới', message: `${exam.title} đã được giao vào lớp ${result.classItem.code}.`, isRead: false, createdAt: new Date().toISOString() })
   writeData(result.data)
   res.status(201).json({ data: assignment })
 })
 
-app.get('/api/exams', (_req, res) => {
+app.get('/api/exams', (req, res) => {
   const data = readData()
-  res.json({ data: (data.exams || []).filter((exam) => exam.status === 'published').map(({ questions, ...exam }) => ({ ...exam, questionCount: questions.length })) })
+  const visibleExams = (data.exams || []).filter((exam) => exam.status === 'published' && (
+    req.user.role === 'admin'
+    || (req.user.role === 'teacher' && (!exam.classId || canViewClass(data, findClass(data, exam.classId), req.user)))
+    || (req.user.role === 'student' && (data.assignments || []).some((assignment) => assignment.examId === exam.id && canViewAssignment(data, assignment, req.user)))
+  ))
+  res.json({ data: visibleExams.map(({ questions, ...exam }) => ({ ...exam, questionCount: questions.length })) })
 })
 
 app.get('/api/exams/:examId', (req, res) => {
   const data = readData()
   const exam = (data.exams || []).find((item) => item.id === req.params.examId)
   if (!exam) return res.status(404).json({ error: 'Không tìm thấy đề thi.' })
-  if (exam.status !== 'published' && !['admin', 'teacher'].includes(req.user.role)) return res.status(403).json({ error: 'Đề thi chưa được giao vào lớp.' })
+  const assignment = (data.assignments || []).find((item) => item.examId === exam.id && canViewAssignment(data, item, req.user))
+  if (req.user.role === 'student' && (!assignment || exam.status !== 'published')) return res.status(403).json({ error: 'Đề thi chưa được giao cho bạn.' })
+  if (req.user.role === 'teacher' && exam.classId && !canViewClass(data, findClass(data, exam.classId), req.user)) return res.status(403).json({ error: 'Bạn không quản lý đề thi này.' })
   res.json({ data: { ...exam, questions: exam.questions.map(({ correctAnswer, explanation, ...question }) => question) } })
 })
 
@@ -339,6 +423,10 @@ app.post('/api/exams/:examId/attempts', (req, res) => {
   if (!exam) return res.status(404).json({ error: 'Không tìm thấy đề thi.' })
   const { studentId, answers = [] } = req.body
   if (!studentId) return res.status(400).json({ error: 'studentId là bắt buộc.' })
+  const student = data.students.find((item) => item.id === String(studentId).trim().toUpperCase())
+  if (!student) return res.status(404).json({ error: 'Không tìm thấy học sinh.' })
+  if (req.user.role === 'student' && (!getStudentForUser(data, req.user) || getStudentForUser(data, req.user).id !== student.id)) return res.status(403).json({ error: 'Bạn chỉ có thể nộp bài cho tài khoản của mình.' })
+  if (req.user.role === 'student' && !(data.assignments || []).some((item) => item.examId === exam.id && canViewAssignment(data, item, req.user))) return res.status(403).json({ error: 'Bạn chưa được giao đề thi này.' })
   const score = exam.questions.reduce((total, question, index) => total + (answers[index] === question.correctAnswer ? 1 : 0), 0)
   data.attempts ||= []
   const attempt = { id: `attempt-${randomUUID()}`, examId: exam.id, studentId, answers, correctCount: score, totalQuestions: exam.questions.length, score: Math.round((score / exam.questions.length) * 10 * 100) / 100, submittedAt: new Date().toISOString() }
@@ -396,6 +484,110 @@ ${sourceText.slice(0, 50000)}`
   } catch (error) { console.error('Exam conversion error:', error); res.status(502).json({ error: 'Không thể chuyển đổi đề thi từ tài liệu.' }) }
 }
 
+app.get('/api/timetable', (req, res) => {
+  const data = readData()
+  const currentUser = data.users.find((user) => user.id === req.user.sub)
+  const sessions = (data.timetableSessions || [])
+    .map((session) => ({ ...session, classItem: findClass(data, session.classId) }))
+    .filter((session) => canViewClass(data, session.classItem, currentUser || req.user))
+    .map(({ classItem, ...session }) => ({
+      ...session,
+      classCode: classItem.code,
+      className: classItem.name,
+      teacherId: classItem.teacherId,
+      attendanceSession: (data.attendanceSessions || [])
+        .filter((attendance) => attendance.timetableSessionId === session.id)
+        .sort((a, b) => b.startsAt.localeCompare(a.startsAt))
+        .map((attendance) => ({ ...attendance, status: attendance.status === 'active' && new Date(attendance.expiresAt).getTime() <= Date.now() ? 'expired' : attendance.status }))[0] || null,
+    }))
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+  res.json({ data: sessions })
+})
+
+app.post('/api/timetable', allowRoles('admin', 'teacher'), (req, res) => {
+  const { classId, title = '', subject = '', room = '', startsAt, endsAt, notes = '' } = req.body
+  if (!classId || !startsAt || !endsAt) return res.status(400).json({ error: 'classId, startsAt và endsAt là bắt buộc.' })
+  const data = readData()
+  const classItem = findClass(data, classId)
+  if (!classItem) return res.status(404).json({ error: 'Không tìm thấy lớp học.' })
+  if (req.user.role !== 'admin' && classItem.teacherId !== req.user.sub) return res.status(403).json({ error: 'Bạn không quản lý lớp học này.' })
+  const start = new Date(startsAt)
+  const end = new Date(endsAt)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return res.status(400).json({ error: 'Thời gian buổi học không hợp lệ.' })
+  data.timetableSessions ||= []
+  const timetableSession = {
+    id: `timetable-${randomUUID()}`,
+    classId: classItem.id,
+    title: String(title || classItem.subject || classItem.name).trim(),
+    subject: String(subject || classItem.subject || '').trim(),
+    room: String(room || classItem.room || '').trim(),
+    startsAt: start.toISOString(),
+    endsAt: end.toISOString(),
+    notes: String(notes || '').trim(),
+    createdBy: req.user.sub,
+    createdAt: new Date().toISOString(),
+  }
+  data.timetableSessions.push(timetableSession)
+  writeData(data)
+  res.status(201).json({ data: { ...timetableSession, classCode: classItem.code, className: classItem.name, attendanceSession: null } })
+})
+
+app.patch('/api/timetable/:timetableId', allowRoles('admin', 'teacher'), (req, res) => {
+  const result = requireTimetableManager(req, res)
+  if (!result) return
+  const { title, subject, room, startsAt, endsAt, notes } = req.body
+  const nextStart = startsAt === undefined ? new Date(result.timetableSession.startsAt) : new Date(startsAt)
+  const nextEnd = endsAt === undefined ? new Date(result.timetableSession.endsAt) : new Date(endsAt)
+  if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime()) || nextEnd <= nextStart) return res.status(400).json({ error: 'Thời gian buổi học không hợp lệ.' })
+  if (title !== undefined) result.timetableSession.title = String(title).trim()
+  if (subject !== undefined) result.timetableSession.subject = String(subject).trim()
+  if (room !== undefined) result.timetableSession.room = String(room).trim()
+  if (notes !== undefined) result.timetableSession.notes = String(notes).trim()
+  result.timetableSession.startsAt = nextStart.toISOString()
+  result.timetableSession.endsAt = nextEnd.toISOString()
+  writeData(result.data)
+  res.json({ data: result.timetableSession })
+})
+
+app.delete('/api/timetable/:timetableId', allowRoles('admin', 'teacher'), (req, res) => {
+  const result = requireTimetableManager(req, res)
+  if (!result) return
+  result.data.timetableSessions = result.data.timetableSessions.filter((item) => item.id !== result.timetableSession.id)
+  writeData(result.data)
+  res.json({ data: { id: result.timetableSession.id } })
+})
+
+app.post('/api/timetable/:timetableId/attendance/sessions', allowRoles('admin', 'teacher'), (req, res) => {
+  const result = requireTimetableManager(req, res)
+  if (!result) return
+  const expiresInMinutes = Math.max(1, Math.min(240, Number(req.body.expiresInMinutes || 90)))
+  const session = createAttendanceSession(result.data, result.classItem, result.timetableSession, expiresInMinutes)
+  result.data.notifications ||= []
+  result.data.notifications.push({
+    id: `notification-${randomUUID()}`,
+    recipientType: 'class',
+    classId: result.classItem.id,
+    type: 'attendance',
+    title: 'Mở điểm danh',
+    message: `Điểm danh đã mở cho ${result.timetableSession.title}.`,
+    isRead: false,
+    createdAt: new Date().toISOString(),
+  })
+  writeData(result.data)
+  res.status(201).json({ data: session })
+})
+
+app.get('/api/timetable/:timetableId/attendance', (req, res) => {
+  const data = readData()
+  const timetableSession = findTimetableSession(data, req.params.timetableId)
+  const classItem = timetableSession && findClass(data, timetableSession.classId)
+  const currentUser = data.users.find((user) => user.id === req.user.sub)
+  if (!timetableSession || !canViewClass(data, classItem, currentUser || req.user)) return res.status(404).json({ error: 'Không tìm thấy buổi học.' })
+  const sessions = (data.attendanceSessions || []).filter((session) => session.timetableSessionId === timetableSession.id)
+  const records = (data.attendanceRecords || []).filter((record) => sessions.some((session) => session.id === record.sessionId))
+  res.json({ data: { timetableSession, sessions, records } })
+})
+
 app.get('/api/classes', (req, res) => {
   const data = readData()
   const currentUser = data.users.find((user) => user.id === req.user.sub)
@@ -430,12 +622,14 @@ app.get('/api/classes/:classId', (req, res) => {
   const result = requireClass(req, res)
   if (!result) return
   const { data, classItem } = result
+  if (!canViewClass(data, classItem, req.user)) return res.status(403).json({ error: 'Bạn không thuộc lớp học này.' })
   res.json({ data: { ...classItem, studentCount: data.students.filter((student) => student.classId === classItem.id).length, assignmentCount: data.assignments.filter((assignment) => assignment.classId === classItem.id).length, sessionCount: data.attendanceSessions.filter((session) => session.classId === classItem.id).length } })
 })
 
 app.get('/api/classes/:classId/students', (req, res) => {
   const result = requireClass(req, res)
   if (!result) return
+  if (!canViewClass(result.data, result.classItem, req.user)) return res.status(403).json({ error: 'Bạn không thuộc lớp học này.' })
   res.json({ data: result.data.students.filter((student) => student.classId === result.classItem.id) })
 })
 
@@ -455,6 +649,7 @@ app.post('/api/classes/:classId/students', allowRoles('admin', 'teacher'), (req,
 app.get('/api/classes/:classId/attendance', (req, res) => {
   const result = requireClass(req, res)
   if (!result) return
+  if (!canViewClass(result.data, result.classItem, req.user)) return res.status(403).json({ error: 'Bạn không thuộc lớp học này.' })
   const now = Date.now()
   const sessions = result.data.attendanceSessions.filter((session) => session.classId === result.classItem.id).map((session) => ({
     ...session,
@@ -467,12 +662,10 @@ app.get('/api/classes/:classId/attendance', (req, res) => {
 app.post('/api/classes/:classId/attendance/sessions', allowRoles('admin', 'teacher'), (req, res) => {
   const result = requireClassManager(req, res)
   if (!result) return
-  const expiresInMinutes = Math.max(1, Number(req.body.expiresInMinutes || 2))
-  const now = new Date()
-  result.data.attendanceSessions.filter((item) => item.classId === result.classItem.id && item.status === 'active').forEach((item) => { item.status = 'closed' })
-  const session = { id: `attendance-${randomUUID()}`, classId: result.classItem.id, code: String(Math.floor(100000 + Math.random() * 900000)), startsAt: now.toISOString(), expiresAt: new Date(now.getTime() + expiresInMinutes * 60000).toISOString(), status: 'active' }
-  result.data.attendanceSessions.push(session)
-  result.data.students.filter((student) => student.classId === result.classItem.id).forEach((student) => result.data.attendanceRecords.push({ id: `record-${randomUUID()}`, sessionId: session.id, studentId: student.id, status: 'absent', checkedAt: null }))
+  const timetableSession = req.body.timetableSessionId ? findTimetableSession(result.data, req.body.timetableSessionId) : null
+  if (req.body.timetableSessionId && (!timetableSession || timetableSession.classId !== result.classItem.id)) return res.status(400).json({ error: 'Buổi học không thuộc lớp này.' })
+  const expiresInMinutes = Math.max(1, Math.min(240, Number(req.body.expiresInMinutes || 2)))
+  const session = createAttendanceSession(result.data, result.classItem, timetableSession, expiresInMinutes)
   writeData(result.data)
   res.status(201).json({ data: session })
 })
@@ -513,24 +706,56 @@ app.post('/api/attendance/check-in', authenticate, allowRoles('student'), (req, 
 app.get('/api/classes/:classId/assignments', (req, res) => {
   const result = requireClass(req, res)
   if (!result) return
-  res.json({ data: result.data.assignments.filter((assignment) => assignment.classId === result.classItem.id) })
+  if (!canViewClass(result.data, result.classItem, req.user)) return res.status(403).json({ error: 'Bạn không thuộc lớp học này.' })
+  res.json({ data: result.data.assignments.filter((assignment) => assignment.classId === result.classItem.id && canViewAssignment(result.data, assignment, req.user)) })
 })
 
 app.post('/api/classes/:classId/assignments', allowRoles('admin', 'teacher'), (req, res) => {
   const result = requireClassManager(req, res)
   if (!result) return
-  const { title, type = 'exam', dueAt } = req.body
+  const { title, type = 'homework', dueAt, studentIds = [] } = req.body
   if (!title || !dueAt) return res.status(400).json({ error: 'title và dueAt là bắt buộc.' })
-  const assignment = { id: `assignment-${randomUUID()}`, classId: result.classItem.id, title: title.trim(), type, dueAt, status: 'published', submitted: 0, total: result.data.students.filter((student) => student.classId === result.classItem.id).length }
+  if (!['homework', 'exam', 'document'].includes(type)) return res.status(400).json({ error: 'Loại hoạt động không hợp lệ.' })
+  if (!Array.isArray(studentIds)) return res.status(400).json({ error: 'studentIds phải là một mảng.' })
+  const classStudents = result.data.students.filter((student) => student.classId === result.classItem.id)
+  const requestedStudentIds = [...new Set(studentIds.map((id) => String(id).trim()))]
+  if (requestedStudentIds.some((id) => !classStudents.some((student) => student.id === id))) return res.status(400).json({ error: 'Có học sinh không thuộc lớp học này.' })
+  const targetType = requestedStudentIds.length ? 'individual' : 'class'
+  const targetStudentIds = requestedStudentIds.length ? requestedStudentIds : classStudents.map((student) => student.id)
+  const assignment = {
+    id: `assignment-${randomUUID()}`,
+    classId: result.classItem.id,
+    title: title.trim(),
+    type,
+    dueAt,
+    status: 'published',
+    targetType,
+    targetStudentIds,
+    submitted: 0,
+    total: targetStudentIds.length,
+    createdBy: req.user.sub,
+    createdAt: new Date().toISOString(),
+  }
   result.data.assignments.push(assignment)
-  result.data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: 'class', classId: result.classItem.id, type: 'assignment', title: 'Bài tập mới', message: `${assignment.title} đã được giao.`, isRead: false, createdAt: new Date().toISOString() })
+  result.data.notifications ||= []
+  result.data.notifications.push({ id: `notification-${randomUUID()}`, recipientType: targetType, classId: result.classItem.id, studentIds: targetStudentIds, type: 'assignment', title: type === 'exam' ? 'Đề thi mới' : 'Bài tập mới', message: `${assignment.title} đã được giao.`, isRead: false, createdAt: new Date().toISOString() })
   writeData(result.data)
   res.status(201).json({ data: assignment })
 })
 
-app.get('/api/notifications', (_req, res) => {
+app.get('/api/notifications', (req, res) => {
   const data = readData()
-  res.json({ data: data.notifications.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) })
+  const student = req.user.role === 'student' ? getStudentForUser(data, req.user) : null
+  const notifications = (data.notifications || []).filter((notification) => {
+    if (req.user.role === 'admin') return true
+    if (req.user.role === 'teacher') {
+      const classItem = notification.classId && findClass(data, notification.classId)
+      return !classItem || classItem.teacherId === req.user.sub
+    }
+    if (notification.recipientType === 'individual') return notification.studentIds?.includes(student?.id)
+    return notification.classId === student?.classId
+  })
+  res.json({ data: notifications.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) })
 })
 
 app.use((_req, res) => res.status(404).json({ error: 'API route không tồn tại.' }))
@@ -539,5 +764,5 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Lỗi máy chủ.' })
 })
 
-if (!existsSync(dataPath)) writeData({ classes: [], students: [], attendanceSessions: [], attendanceRecords: [], assignments: [], notifications: [] })
+if (!existsSync(dataPath)) writeData({ users: [], classes: [], students: [], timetableSessions: [], attendanceSessions: [], attendanceRecords: [], assignments: [], notifications: [], exams: [], attempts: [], passwordResetTokens: [] })
 app.listen(port, () => console.log(`ExamAI API đang chạy tại http://localhost:${port}`))

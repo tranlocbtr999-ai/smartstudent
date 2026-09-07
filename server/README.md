@@ -19,7 +19,7 @@ Quên mật khẩu production cần cấu hình `RESEND_API_KEY`, `MAIL_FROM` v�
 ## Endpoint chính
 
 - `POST /auth/login`
-- `POST /auth/register` (chỉ đăng ký học sinh)
+- `POST /auth/register` (đăng ký học sinh hoặc giáo viên)
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
 - `PATCH /auth/profile` (đã đăng nhập)
@@ -31,6 +31,10 @@ Quên mật khẩu production cần cấu hình `RESEND_API_KEY`, `MAIL_FROM` v�
 - `GET, POST /classes`
 - `GET /classes/:classId`
 - `GET, POST /classes/:classId/students`
+- `GET, POST /timetable` (lịch dạy toàn trường; teacher chỉ quản lý lớp của mình)
+- `PATCH, DELETE /timetable/:timetableId`
+- `GET /timetable/:timetableId/attendance`
+- `POST /timetable/:timetableId/attendance/sessions` (mở điểm danh theo buổi học)
 - `GET /classes/:classId/attendance`
 - `POST /classes/:classId/attendance/sessions`
 - `PATCH /attendance/:recordId`
@@ -47,3 +51,5 @@ Các endpoint cần đăng nhập nhận header `Authorization: Bearer <token>`.
 
 Google login cần tạo OAuth 2.0 Web Client ID trong Google Cloud Console. Thêm cùng Client ID vào `GOOGLE_CLIENT_ID` trên Render và `VITE_GOOGLE_CLIENT_ID` trên Vercel; thêm domain Vercel vào Authorized JavaScript origins.
 - `POST /ai/generate-exam`
+
+Khi tạo assignment, gửi `studentIds: []` để giao cả lớp hoặc `studentIds: ["HS00128"]` để giao cho học sinh được chọn. Hệ thống kiểm tra các mã học sinh phải thuộc lớp và chỉ trả assignment/đề thi cho đúng đối tượng.
