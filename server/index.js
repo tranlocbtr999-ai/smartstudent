@@ -201,7 +201,7 @@ app.post('/api/auth/login', async (req, res) => {
   const { identifier, email, password, role } = req.body
   const data = readData()
   const loginIdentifier = String(identifier || email || '').trim().toLowerCase()
-  const user = (data.users || []).find((item) => item.email.toLowerCase() === loginIdentifier || item.username?.toLowerCase() === loginIdentifier)
+  const user = (data.users || []).find((item) => item.email?.toLowerCase() === loginIdentifier || item.username?.toLowerCase() === loginIdentifier)
   if (!user || !(await bcrypt.compare(password || '', user.passwordHash))) return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' })
   if (role && user.role !== role) return res.status(403).json({ error: `Tài khoản này là ${user.role === 'teacher' ? 'giáo viên' : user.role === 'student' ? 'học sinh' : 'quản trị viên'}, không phải loại tài khoản đã chọn.` })
   res.json({ data: { token: issueToken(user), user: publicUser(user) } })
@@ -216,7 +216,7 @@ app.post('/api/auth/register', async (req, res) => {
   if (!['student', 'teacher'].includes(role)) return res.status(400).json({ error: 'Vai trò đăng ký không hợp lệ.' })
   const data = readData()
   data.users ||= []
-  if (data.users.some((user) => user.email.toLowerCase() === email.trim().toLowerCase())) return res.status(409).json({ error: 'Email đã được sử dụng.' })
+  if (data.users.some((user) => user.email?.toLowerCase() === email.trim().toLowerCase())) return res.status(409).json({ error: 'Email đã được sử dụng.' })
   if (data.users.some((user) => user.username?.toLowerCase() === normalizedUsername)) return res.status(409).json({ error: 'Tên tài khoản đã được sử dụng.' })
   const user = { id: `${role}-${randomUUID()}`, username: normalizedUsername, email: email.trim().toLowerCase(), name: name.trim(), phone: phone.trim(), studentCode: role === 'student' ? studentCode.trim() : '', role, passwordHash: await bcrypt.hash(password, 12), createdAt: new Date().toISOString() }
   data.users.push(user)
@@ -227,7 +227,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/forgot-password', (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase()
   const data = readData()
-  const user = data.users?.find((item) => item.email.toLowerCase() === email)
+  const user = data.users?.find((item) => item.email?.toLowerCase() === email)
   const response = { message: 'Nếu email tồn tại, hướng dẫn đặt lại mật khẩu sẽ được gửi đến hộp thư.' }
   if (user) {
     const rawToken = randomUUID().replaceAll('-', '')
