@@ -427,8 +427,15 @@ function StudentPortal({ user, onLogout }) {
     } catch (requestError) {
       setAttendanceMessage(requestError.message)
     }
-    async function requestJoin() {
-      try { await api.requestJoinByCode(joinCode); setJoinMessage('Đã gửi yêu cầu. Vui lòng chờ giáo viên phê duyệt.'); setJoinCode('') } catch (requestError) { setJoinMessage(requestError.message) }
+  }
+
+  async function requestJoin() {
+    try {
+      await api.requestJoinByCode(joinCode.trim())
+      setJoinMessage('Đã gửi yêu cầu. Vui lòng chờ giáo viên phê duyệt.')
+      setJoinCode('')
+    } catch (requestError) {
+      setJoinMessage(requestError.message)
     }
   }
 
