@@ -63,7 +63,7 @@ Backend Express có thể deploy riêng trên Render bằng file `render.yaml`:
 3. Sau khi deploy, API có dạng `https://ten-service.onrender.com/api`.
 4. Frontend cần dùng URL API này thay cho `http://localhost:4000/api` khi kết nối thật.
 
-Lưu ý: `server/data.json` phù hợp cho demo và development. Production nên thay bằng PostgreSQL, Firebase hoặc Supabase vì filesystem của hosting có thể bị reset khi service restart.
+Production Render hiện dùng persistent disk tại `/var/data` thông qua `DATA_DIR`. Backend ghi dữ liệu theo kiểu nguyên tử và tạo bản sao `data.json.bak` trước mỗi lần cập nhật, nên deploy/restart không làm mất dữ liệu. Với quy mô lớn, vẫn nên chuyển sang PostgreSQL, Firebase hoặc Supabase.
 
 ### Checklist deploy Vercel + Render
 
@@ -77,7 +77,7 @@ Lưu ý: `server/data.json` phù hợp cho demo và development. Production nên
 
 ## Phạm vi hiện tại
 
-Backend hiện cung cấp API REST và lưu file JSON. Khi Render restart, file JSON có thể bị reset; production nên chuyển sang PostgreSQL, Firebase hoặc Supabase. Backend đã giới hạn CORS bằng biến `ALLOWED_ORIGINS`; nếu đổi domain Vercel, cập nhật biến này trên Render rồi redeploy.
+Backend hiện cung cấp API REST và lưu file JSON trên persistent disk Render. Schema được tự động bổ sung các mảng mới khi cập nhật tính năng, file tạm được đổi tên nguyên tử và bản sao dự phòng được tạo trước khi ghi. Backend đã giới hạn CORS bằng biến `ALLOWED_ORIGINS`; nếu đổi domain Vercel, cập nhật biến này trên Render rồi redeploy.
 
 AI tạo đề hiện có hai luồng: chuyển file Word/PDF hoặc nội dung trắc nghiệm có sẵn thành bài online; hệ thống không tự thêm câu hỏi và không đoán đáp án nếu tài liệu không đánh dấu rõ.
 

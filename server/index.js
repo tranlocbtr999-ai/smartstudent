@@ -8,12 +8,16 @@ import mammoth from 'mammoth'
 import { PDFParse } from 'pdf-parse'
 import { randomUUID } from 'node:crypto'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const dataPath = join(__dirname, 'data.json')
+const dataDirectory = process.env.DATA_DIR || __dirname
+mkdirSync(dataDirectory, { recursive: true })
+const dataPath = join(dataDirectory, 'data.json')
+const seedDataPath = join(__dirname, 'data.json')
+const backupDataPath = join(dataDirectory, 'data.json.bak')
 const app = express()
 const port = Number(process.env.PORT || 4000)
 const jwtSecret = process.env.JWT_SECRET || 'exam-ai-development-secret-change-me'
@@ -38,12 +42,33 @@ app.use(cors({
 app.use(express.json())
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
 
+const emptyData = () => ({ users: [], classes: [], students: [], timetableSessions: [], attendanceSessions: [], attendanceRecords: [], assignments: [], submissions: [], notifications: [], exams: [], attempts: [], passwordResetTokens: [] })
+
+function normalizeData(data) {
+  const defaults = emptyData()
+  return Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => [key, Array.isArray(data?.[key]) ? data[key] : fallback]))
+}
+
 function readData() {
-  return JSON.parse(readFileSync(dataPath, 'utf8'))
+  if (!existsSync(dataPath)) {
+    if (existsSync(backupDataPath)) copyFileSync(backupDataPath, dataPath)
+    else if (dataDirectory !== __dirname && existsSync(seedDataPath)) copyFileSync(seedDataPath, dataPath)
+    else writeFileSync(dataPath, `${JSON.stringify(emptyData(), null, 2)}\n`)
+  }
+  try {
+    return normalizeData(JSON.parse(readFileSync(dataPath, 'utf8')))
+  } catch (error) {
+    if (existsSync(backupDataPath)) return normalizeData(JSON.parse(readFileSync(backupDataPath, 'utf8')))
+    throw error
+  }
 }
 
 function writeData(data) {
-  writeFileSync(dataPath, `${JSON.stringify(data, null, 2)}\n`)
+  const serialized = `${JSON.stringify(normalizeData(data), null, 2)}\n`
+  const tempPath = `${dataPath}.tmp`
+  if (existsSync(dataPath)) copyFileSync(dataPath, backupDataPath)
+  writeFileSync(tempPath, serialized)
+  renameSync(tempPath, dataPath)
 }
 
 function findClass(data, classId) {
@@ -841,5 +866,5 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Lỗi máy chủ.' })
 })
 
-if (!existsSync(dataPath)) writeData({ users: [], classes: [], students: [], timetableSessions: [], attendanceSessions: [], attendanceRecords: [], assignments: [], submissions: [], notifications: [], exams: [], attempts: [], passwordResetTokens: [] })
+if (!existsSync(dataPath)) writeData(emptyData())
 app.listen(port, () => console.log(`ExamAI API đang chạy tại http://localhost:${port}`))

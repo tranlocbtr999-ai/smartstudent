@@ -1,6 +1,6 @@
 # ExamAI API
 
-API demo dùng Express và lưu dữ liệu trong `data.json`.
+API dùng Express và lưu dữ liệu trong `data.json`. Khi chạy trên Render, `DATA_DIR=/var/data` trỏ tới persistent disk; backend tự migration các trường mới, ghi nguyên tử và giữ `data.json.bak` để khôi phục khi file chính hỏng.
 
 ## Chạy
 
